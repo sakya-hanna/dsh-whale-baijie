@@ -2108,7 +2108,7 @@ soundPanelBtn.addEventListener('click', function (e) { e.stopPropagation(); open
 row2.appendChild(soundPanelBtn)
 // —— 白姐主动气泡入口：状态摘要 + 「设置」按钮（面板见 openProactivePanel）——
 var rowProactive = menuRow()
-rowProactive.appendChild(menuLabel('白姐主动说话'))
+rowProactive.appendChild(menuLabel('白姐气泡 · 评论'))
 var proactiveStateEl = document.createElement('span')
 proactiveStateEl.className = 'dshwv-volpct'
 proactiveStateEl.textContent = '已关闭'
@@ -2138,6 +2138,30 @@ hatBtn.textContent = '设置'
 hatBtn.title = '选择无帽版角色 / 草帽图片，调整长按时间、戴回时间与落位'
 hatBtn.addEventListener('click', function (e) { e.stopPropagation(); openHatPanel() })
 rowHat.appendChild(hatBtn)
+// —— 互动气泡入口：先给一个固定的小对话，按钮点在气泡里 ——
+var rowTalk = menuRow()
+rowTalk.appendChild(menuLabel('白姐气泡 · 互动'))
+var interactiveStateEl = document.createElement('span')
+interactiveStateEl.className = 'dshwv-volpct'
+interactiveStateEl.textContent = '已关闭'
+interactiveStateEl.title = '互动气泡当前状态'
+rowTalk.appendChild(interactiveStateEl)
+var talkBtn = document.createElement('button')
+talkBtn.type = 'button'
+talkBtn.className = 'dshwv-roleimport'
+talkBtn.style.flex = '1'
+talkBtn.textContent = '试一个'
+talkBtn.title = '立即打开一个带按钮的互动气泡'
+talkBtn.addEventListener('click', function (e) { e.stopPropagation(); openInteractiveSample() })
+rowTalk.appendChild(talkBtn)
+var interactiveSetBtn = document.createElement('button')
+interactiveSetBtn.type = 'button'
+interactiveSetBtn.className = 'dshwv-roleimport'
+interactiveSetBtn.style.flex = '1'
+interactiveSetBtn.textContent = '设置'
+interactiveSetBtn.title = '互动气泡：随机触发、上限、LLM 概率、固定内容库、导入导出'
+interactiveSetBtn.addEventListener('click', function (e) { e.stopPropagation(); openInteractivePanel() })
+rowTalk.appendChild(interactiveSetBtn)
 var row6 = menuRow()
 row6.appendChild(menuLabel('气泡全局开关'))
 row6.appendChild(bubbleToggle)
@@ -2202,6 +2226,7 @@ menuBox.appendChild(row1)
 menuBox.appendChild(row2)
 menuBox.appendChild(rowProactive)
 menuBox.appendChild(rowHat)
+menuBox.appendChild(rowTalk)
 menuBox.appendChild(row6)
 // v762：「每轮消耗提示」整行**不再挂到主菜单**（菜单里已再无此行，配置入口移进「全局设置」面板）。
 // ⚠️ row7 及其内部控件（turnCostToggle / turnCostCustomBtn）的创建**必须原样保留**：
@@ -4220,6 +4245,27 @@ function updateProactiveMenuState() {
       .catch(function () {})
   } catch (err) {}
 }
+function bubbleSettingsTabs(active, mask) {
+  var bar = document.createElement('div')
+  bar.style.cssText = 'display:flex;gap:6px;padding:0 6px 6px'
+  function tab(label, key) {
+    var b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'dshwv-bubbtn ' + (key === active ? 'dshwv-bubbtn-ok' : 'dshwv-bubbtn-no')
+    b.textContent = label
+    b.style.flex = '1'
+    b.addEventListener('click', function () {
+      if (key === active) return
+      try { dshwBodyDetach(mask) } catch (err) {}
+      if (key === 'comment') openProactivePanel()
+      else openInteractivePanel()
+    })
+    bar.appendChild(b)
+  }
+  tab('评论泡', 'comment')
+  tab('互动泡', 'interactive')
+  return bar
+}
 function openProactivePanel() {
   fetch(PROACTIVE_URL, { cache: 'no-store' })
     .then(function (r) { return r.json() })
@@ -4275,12 +4321,13 @@ function buildProactivePanel(cfg, defaults, stats, recent) {
     card.style.overflow = 'hidden auto'
     var title = document.createElement('div')
     title.className = 'dshwv-bubtitle'
-    title.textContent = '白姐主动说话'
+    title.textContent = '白姐气泡'
     card.appendChild(title)
+    card.appendChild(bubbleSettingsTabs('comment', mask))
     var status = document.createElement('div')
     status.className = 'dshwv-hint'
     status.style.cssText = 'padding:2px 6px 6px;font-size:11px;line-height:1.5'
-    status.textContent = '已展示 ' + (Number(stats.shown) || 0) + ' · 模型拒绝 ' + (Number(stats.declined) || 0) +
+    status.textContent = '评论泡 · 已展示 ' + (Number(stats.shown) || 0) + ' · 模型拒绝 ' + (Number(stats.declined) || 0) +
       ' · 失败 ' + (Number(stats.failed) || 0) + ' · 跳过 ' + (Number(stats.skipped) || 0)
     card.appendChild(status)
     var body = document.createElement('div')
@@ -4854,6 +4901,479 @@ function buildHatPanel(roles, imgs) {
     dshwBodyAppend(mask)
   } catch (err) {}
 }
+
+// ===== 互动气泡设置面板 =====
+var INTERACTIVE_URL = '/dsh-whale/interactive.json'
+var interactiveDefaultsCache = null
+function interactiveClone(obj) {
+  try { return JSON.parse(JSON.stringify(obj)) } catch (err) { return obj }
+}
+// 旧宿主没有这个路由时返回 404 + 空 body；直接 r.json() 会抛
+// “Unexpected end of JSON input”，对弟弟没有可操作信息。这里统一换成
+// “请完全重启 dsh web”的提示，刷新页面不算重启宿主。
+function fetchInteractiveJson(url, opts) {
+  return fetch(url, opts).then(function (r) {
+    return r.text().then(function (text) {
+      if (!r.ok) throw new Error('互动气泡接口还没加载（HTTP ' + r.status + '）。请完全重启 dsh web，只刷新页面不会加载新宿主。')
+      if (!text || !text.trim()) throw new Error('互动气泡接口返回空内容（HTTP ' + r.status + '）。请完全重启 dsh web。')
+      try { return JSON.parse(text) } catch (err) {
+        throw new Error('互动气泡接口返回的不是 JSON（HTTP ' + r.status + '）。请完全重启 dsh web。')
+      }
+    })
+  })
+}
+function updateInteractiveMenuState() {
+  try {
+    fetchInteractiveJson(INTERACTIVE_URL, { cache: 'no-store' })
+      .then(function (d) {
+        if (!d || !d.ok || !d.config) return
+        var c = d.config
+        if (typeof interactiveStateEl === 'undefined' || !interactiveStateEl) return
+        interactiveStateEl.textContent = c.enabled
+          ? (Math.round(Number(c.llmProbability || 0) * 100) + '% · ' + c.maxPerWindow + '/' + c.windowHours + 'h')
+          : '已关闭'
+        interactiveStateEl.title = c.enabled
+          ? ('互动气泡：LLM ' + Math.round(Number(c.llmProbability || 0) * 100) + '%，' + c.windowHours + ' 小时最多 ' + c.maxPerWindow + ' 次')
+          : '互动气泡已关闭'
+      })
+      .catch(function () {
+        try {
+          if (typeof interactiveStateEl !== 'undefined' && interactiveStateEl) {
+            interactiveStateEl.textContent = '需重启宿主'
+            interactiveStateEl.title = '互动气泡接口还是 404：当前 dsh web 进程没有加载新代码，请完全重启宿主。'
+          }
+        } catch (err) {}
+      })
+  } catch (err) {}
+}
+function openInteractivePanel() {
+  fetchInteractiveJson(INTERACTIVE_URL, { cache: 'no-store' })
+    .then(function (d) {
+      if (!d || !d.ok) throw new Error((d && d.error) || '读取互动气泡配置失败')
+      interactiveDefaultsCache = d.defaults || null
+      buildInteractivePanel(d)
+    })
+    .catch(function (err) { buildInteractiveError(err) })
+}
+function buildInteractiveError(err) {
+  try {
+    var mask = document.createElement('div')
+    mask.className = 'dshwv-bubmask'
+    mask.style.zIndex = '30000'
+    var card = document.createElement('div')
+    card.className = 'dshwv-bubcard'
+    card.style.width = 'min(430px,calc(100vw - 16px))'
+    var title = document.createElement('div')
+    title.className = 'dshwv-bubtitle'
+    title.textContent = '互动气泡'
+    card.appendChild(title)
+    var p = document.createElement('div')
+    p.className = 'dshwv-hint'
+    p.style.padding = '8px 6px'
+    p.textContent = '读取配置失败：' + String((err && err.message) || err)
+    card.appendChild(p)
+    var btns = document.createElement('div')
+    btns.className = 'dshwv-bubbtns'
+    var close = document.createElement('button')
+    close.type = 'button'
+    close.className = 'dshwv-bubbtn dshwv-bubbtn-no'
+    close.textContent = '关闭'
+    close.addEventListener('click', function () { dshwBodyDetach(mask) })
+    btns.appendChild(close)
+    card.appendChild(btns)
+    mask.appendChild(card)
+    mask.addEventListener('click', function (e) { if (e.target === mask) dshwBodyDetach(mask) })
+    dshwBodyAppend(mask)
+  } catch (e2) {}
+}
+function buildInteractivePanel(data) {
+  try {
+    var cfg = interactiveClone(data.config || {})
+    var items = Array.isArray(data.items) ? interactiveClone(data.items) : []
+    var mask = document.createElement('div')
+    mask.className = 'dshwv-bubmask'
+    mask.style.zIndex = '30000'
+    var card = document.createElement('div')
+    card.className = 'dshwv-bubcard'
+    card.style.width = 'min(470px,calc(100vw - 16px))'
+    card.style.maxHeight = '88vh'
+    card.style.overflow = 'hidden auto'
+    var title = document.createElement('div')
+    title.className = 'dshwv-bubtitle'
+    title.textContent = '白姐气泡'
+    card.appendChild(title)
+    card.appendChild(bubbleSettingsTabs('interactive', mask))
+    var status = document.createElement('div')
+    status.className = 'dshwv-hint'
+    status.style.cssText = 'padding:2px 6px 6px;font-size:11px;line-height:1.5'
+    status.textContent = '随机两选一；和评论泡共用占用锁，任何气泡在展示时新触发直接丢弃。'
+    card.appendChild(status)
+    var body = document.createElement('div')
+    card.appendChild(body)
+    var msg = document.createElement('div')
+    msg.className = 'dshwv-hint'
+    msg.style.cssText = 'padding:4px 6px;font-size:11px;min-height:16px'
+    card.appendChild(msg)
+
+    var firstSection = true
+    function section(text) {
+      var el = document.createElement('div')
+      el.className = 'dshwv-bubsec' + (firstSection ? ' dshwv-bubsec-first' : '')
+      el.textContent = text
+      el.style.marginTop = '10px'
+      body.appendChild(el)
+      firstSection = false
+    }
+    function row(labelText, node, hint, tip) {
+      var r = document.createElement('div')
+      r.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:12px;line-height:1.4'
+      var lab = document.createElement('span')
+      lab.textContent = labelText
+      lab.style.cssText = 'flex:0 0 auto;min-width:76px'
+      r.appendChild(lab)
+      if (node) { node.style.flex = '1 1 auto'; node.style.minWidth = '0'; r.appendChild(node) }
+      if (hint) {
+        var h = document.createElement('span')
+        h.className = 'dshwv-hint'
+        h.textContent = hint
+        h.style.cssText = 'font-size:10px;opacity:.75;flex:0 1 auto'
+        r.appendChild(h)
+      }
+      if (tip) {
+        r.title = tip
+        lab.title = tip
+        if (node) node.title = tip
+        var q = document.createElement('span')
+        q.textContent = '?'
+        q.title = tip
+        q.setAttribute('aria-label', tip)
+        q.style.cssText = 'flex:0 0 auto;width:13px;height:13px;line-height:13px;text-align:center;border-radius:50%;border:1px solid rgba(120,150,190,.55);color:rgba(90,120,160,.9);font-size:9px;cursor:help;user-select:none'
+        r.appendChild(q)
+      }
+      body.appendChild(r)
+      return r
+    }
+    function num(labelText, key, min, max, step, hint, tip) {
+      var inp = document.createElement('input')
+      inp.type = 'number'
+      inp.className = 'dshwv-number'
+      inp.min = String(min); inp.max = String(max); inp.step = String(step)
+      inp.value = String(cfg[key] == null ? '' : cfg[key])
+      inp.style.maxWidth = '96px'
+      inp.addEventListener('input', function () {
+        var n = Number(inp.value)
+        if (isFinite(n)) cfg[key] = n
+      })
+      row(labelText, inp, hint, tip)
+      return inp
+    }
+    function check(labelText, key, hint, tip) {
+      var wrap = document.createElement('label')
+      wrap.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px'
+      var inp = document.createElement('input')
+      inp.type = 'checkbox'; inp.className = 'dshwv-check'; inp.checked = cfg[key] !== false
+      inp.addEventListener('change', function () { cfg[key] = !!inp.checked })
+      wrap.appendChild(inp)
+      var sp = document.createElement('span'); sp.textContent = labelText; wrap.appendChild(sp)
+      row('', wrap, hint, tip)
+      return inp
+    }
+
+    section('触发')
+    check('启用互动气泡', 'enabled', null, '打开后才会按随机间隔主动出现互动泡。关闭时仍可点「试一个」手动打开，不会自动触发。')
+    num('最短间隔', 'minGapMinutes', 1, 1440, 1, '分钟', '两次自动互动泡之间至少隔多少分钟，是硬下限。即使随机范围更小，也不会低于这个值。')
+    num('随机最小', 'randomMinMinutes', 1, 1440, 1, '分钟', '每次触发后，下一次等待时间的随机下限。实际等待会取「随机值」和「最短间隔」里较大的那个。')
+    num('随机最大', 'randomMaxMinutes', 1, 1440, 1, '分钟', '下一次等待时间的随机上限。最小和最大相同就固定间隔；必须大于等于随机最小。')
+    num('窗口小时', 'windowHours', 1, 72, 1, '', '限频统计的滚动窗口长度。例如填 3，就是按最近 3 小时计算次数，不是整点清零。')
+    num('窗口上限', 'maxPerWindow', 1, 100, 1, '次', '这个窗口内最多自动展示几次互动泡。达到上限后，会等到最早一次滚出窗口再继续。手动「试一个」不计入上限。')
+    num('超时', 'ttlSec', 10, 300, 5, '秒', '互动泡出现后等你选择的秒数；超时自动收起。选完按钮后的回复泡按普通泡泡逻辑，约 10 秒后自动关。')
+    var qWrap = document.createElement('label')
+    qWrap.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px'
+    var qChk = document.createElement('input')
+    qChk.type = 'checkbox'; qChk.className = 'dshwv-check'; qChk.checked = !!(cfg.quietHours && cfg.quietHours.enabled)
+    qWrap.appendChild(qChk)
+    var qText = document.createElement('span'); qText.textContent = '静默时段'; qWrap.appendChild(qText)
+    var qs = document.createElement('input'); qs.type = 'time'; qs.value = (cfg.quietHours && cfg.quietHours.start) || '23:00'
+    var qe = document.createElement('input'); qe.type = 'time'; qe.value = (cfg.quietHours && cfg.quietHours.end) || '08:00'
+    qs.style.width = '84px'; qe.style.width = '84px'
+    qWrap.appendChild(qs); qWrap.appendChild(document.createTextNode('至')); qWrap.appendChild(qe)
+    qChk.addEventListener('change', function () { if (!cfg.quietHours) cfg.quietHours = {}; cfg.quietHours.enabled = !!qChk.checked })
+    qs.addEventListener('change', function () { if (!cfg.quietHours) cfg.quietHours = {}; cfg.quietHours.start = qs.value })
+    qe.addEventListener('change', function () { if (!cfg.quietHours) cfg.quietHours = {}; cfg.quietHours.end = qe.value })
+    row('', qWrap, null, '静默时段内不自动触发互动泡；支持跨午夜，例如 23:00 至 08:00。手动「试一个」不受影响。')
+
+    section('来源')
+    var pct = document.createElement('span')
+    pct.className = 'dshwv-volpct'
+    pct.textContent = Math.round(Number(cfg.llmProbability || 0) * 100) + '%'
+    var range = document.createElement('input')
+    range.type = 'range'; range.min = '0'; range.max = '100'; range.step = '5'; range.className = 'dshwv-range'
+    range.value = String(Math.round(Number(cfg.llmProbability || 0) * 100))
+    range.addEventListener('input', function () {
+      cfg.llmProbability = Number(range.value) / 100
+      pct.textContent = range.value + '%'
+    })
+    var rw = document.createElement('span')
+    rw.style.cssText = 'display:flex;align-items:center;gap:8px;flex:1'
+    rw.appendChild(range); rw.appendChild(pct)
+    row('LLM 概率', rw, '0=只用固定库 · 1=只用 LLM', '每次触发时掷一次概率：抽中就走当前会话模型生成，抽不中就从固定内容库随机取。0 等于只用固定库，1 等于只用 LLM；LLM 失败会自动回退固定库。')
+
+    section('固定内容库')
+    var itemsBox = document.createElement('div')
+    body.appendChild(itemsBox)
+    var addBtn = document.createElement('button')
+    addBtn.type = 'button'; addBtn.className = 'dshwv-roleimport'; addBtn.textContent = '新增一条'
+    addBtn.title = '新增一条固定互动：提示 + 两个按钮 + 两段回复。只有 LLM 概率没抽中时才会用到固定库。'
+    addBtn.style.margin = '4px 6px'
+    addBtn.addEventListener('click', function () { editInteractiveItem(null, items, function () { renderItems() }) })
+    body.appendChild(addBtn)
+
+    function renderItems() {
+      itemsBox.innerHTML = ''
+      if (!items.length) {
+        var empty = document.createElement('div')
+        empty.className = 'dshwv-hint'; empty.style.cssText = 'padding:6px;font-size:11px'
+        empty.textContent = '还没有固定内容；LLM 概率为 0 时会跳过。'
+        itemsBox.appendChild(empty)
+        return
+      }
+      for (var i = 0; i < items.length; i++) {
+        (function (it, idx) {
+          var box = document.createElement('div')
+          box.className = 'dshwv-bubrow'
+          box.style.cssText = 'display:block;margin:4px 6px;padding:6px;font-size:11px;text-align:left'
+          var p = document.createElement('div')
+          p.style.cssText = 'font-weight:600;margin-bottom:3px'
+          p.textContent = (idx + 1) + '. ' + it.prompt
+          box.appendChild(p)
+          var o = document.createElement('div')
+          o.className = 'dshwv-hint'
+          o.textContent = '［' + it.options[0].label + '］' + it.options[0].reply + '　［' + it.options[1].label + '］' + it.options[1].reply
+          box.appendChild(o)
+          var btns = document.createElement('div')
+          btns.style.cssText = 'display:flex;gap:6px;margin-top:4px'
+          var edit = document.createElement('button')
+          edit.type = 'button'; edit.className = 'dshwv-bubbtn dshwv-bubbtn-no'; edit.textContent = '编辑'
+          edit.title = '修改这条固定互动的提示、两个按钮和两段回复。'
+          edit.addEventListener('click', function () { editInteractiveItem(it, items, function () { renderItems() }) })
+          btns.appendChild(edit)
+          var del = document.createElement('button')
+          del.type = 'button'; del.className = 'dshwv-bubbtn dshwv-bubbtn-no'; del.textContent = '删除'
+          del.title = '从固定内容库删除这条；保存后生效。'
+          del.addEventListener('click', function () { items.splice(idx, 1); renderItems() })
+          btns.appendChild(del)
+          box.appendChild(btns)
+          itemsBox.appendChild(box)
+        })(items[i], i)
+      }
+    }
+    renderItems()
+
+    section('导入 / 导出')
+    var fileInput = document.createElement('input')
+    fileInput.type = 'file'
+    fileInput.accept = '.json,application/json'
+    fileInput.style.display = 'none'
+    var importMode = 'append'
+    var importAppend = document.createElement('button')
+    importAppend.type = 'button'; importAppend.className = 'dshwv-bubbtn dshwv-bubbtn-no'; importAppend.textContent = '导入 JSON（追加）'
+    importAppend.title = '读取 JSON，把有效条目追加到现有固定库；提示相同的条目会跳过。每条必须正好两个选项。'
+    importAppend.style.cssText = 'margin:4px 4px 4px 6px;padding:5px 10px;font-size:11px'
+    importAppend.addEventListener('click', function () { importMode = 'append'; fileInput.click() })
+    body.appendChild(importAppend)
+    var importReplace = document.createElement('button')
+    importReplace.type = 'button'; importReplace.className = 'dshwv-bubbtn dshwv-bubbtn-no'; importReplace.textContent = '导入 JSON（替换）'
+    importReplace.title = '读取 JSON，用文件里的有效条目替换整个固定库；现有条目会清空。建议先导出备份。'
+    importReplace.style.cssText = 'margin:4px 4px;padding:5px 10px;font-size:11px'
+    importReplace.addEventListener('click', function () { importMode = 'replace'; fileInput.click() })
+    body.appendChild(importReplace)
+    var exportBtn = document.createElement('button')
+    exportBtn.type = 'button'; exportBtn.className = 'dshwv-bubbtn dshwv-bubbtn-no'; exportBtn.textContent = '导出 JSON'
+    exportBtn.title = '把当前固定内容库导出成 JSON 文件，方便备份或分享。格式与导入一致。'
+    exportBtn.style.cssText = 'margin:4px 4px;padding:5px 10px;font-size:11px'
+    exportBtn.addEventListener('click', function () { exportInteractiveItems(items) })
+    body.appendChild(exportBtn)
+    body.appendChild(fileInput)
+    fileInput.addEventListener('change', function () {
+      var f = fileInput.files && fileInput.files[0]
+      if (!f) return
+      var reader = new FileReader()
+      reader.onload = function () {
+        try {
+          var r = parseInteractiveImport(String(reader.result || ''))
+          if (!r.items.length) throw new Error('没有有效条目')
+          if (importMode === 'replace') items = r.items
+          else {
+            var seen = {}
+            for (var i = 0; i < items.length; i++) seen[items[i].prompt] = 1
+            for (var j = 0; j < r.items.length; j++) if (!seen[r.items[j].prompt]) items.push(r.items[j])
+          }
+          renderItems()
+          msg.textContent = '导入 ' + r.items.length + ' 条' + (r.errors.length ? ('，跳过 ' + r.errors.length + ' 条无效') : '') + '（还没保存）'
+        } catch (err) { msg.textContent = '导入失败：' + String((err && err.message) || err) }
+        fileInput.value = ''
+      }
+      reader.readAsText(f, 'utf-8')
+    })
+
+    section('调试')
+    var testBtn = document.createElement('button')
+    testBtn.type = 'button'; testBtn.className = 'dshwv-bubbtn dshwv-bubbtn-no'; testBtn.textContent = '试生成一个（LLM）'
+    testBtn.title = '只调用 LLM 生成一条两选一内容并显示在面板里；不会弹泡泡、不写入历史、不占窗口次数。'
+    testBtn.style.margin = '4px 6px'
+    testBtn.addEventListener('click', function () {
+      msg.textContent = '生成中…'
+      fetchInteractiveJson('/dsh-whale/interactive-test.json', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: cfg }),
+      }).then(function (d) {
+        if (!d || !d.ok) { msg.textContent = '生成失败：' + String((d && d.error) || '未知错误'); return }
+        msg.textContent = '“' + d.item.prompt + '” ［' + d.item.options[0].label + '］/［' + d.item.options[1].label + '］'
+      }).catch(function (err) { msg.textContent = '生成失败：' + String((err && err.message) || err) })
+    })
+    body.appendChild(testBtn)
+
+    var hist = document.createElement('div')
+    hist.className = 'dshwv-hint'
+    hist.title = '最近几次互动泡结果：shown=已展示，answered=已选择，skipped=被丢弃；occupied 表示触发时已有别的气泡在展示，直接丢弃。'
+    hist.style.cssText = 'padding:4px 6px;font-size:10px;line-height:1.5'
+    var hs = Array.isArray(data.history) ? data.history.slice(-6) : []
+    hist.textContent = hs.length ? ('最近：' + hs.map(function (h) { return h.status + (h.reason ? '/' + h.reason : '') }).join(' · ')) : '还没有历史记录。'
+    body.appendChild(hist)
+
+    var btns = document.createElement('div')
+    btns.className = 'dshwv-bubbtns'
+    btns.style.cssText = 'position:sticky;bottom:-14px;z-index:2;padding:9px 0 2px;margin-top:6px;background:linear-gradient(180deg,rgba(244,249,253,0),#f4f9fd 38%)'
+    var cancelBtn = document.createElement('button')
+    cancelBtn.type = 'button'; cancelBtn.className = 'dshwv-bubbtn dshwv-bubbtn-no'; cancelBtn.textContent = '取消'
+    cancelBtn.addEventListener('click', function () { dshwBodyDetach(mask) })
+    btns.appendChild(cancelBtn)
+    var saveBtn = document.createElement('button')
+    saveBtn.type = 'button'; saveBtn.className = 'dshwv-bubbtn dshwv-bubbtn-ok'; saveBtn.textContent = '保存'
+    saveBtn.addEventListener('click', function () {
+      saveBtn.disabled = true
+      fetchInteractiveJson(INTERACTIVE_URL, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: cfg, items: items }),
+      }).then(function (d) {
+        if (!d || !d.ok) throw new Error((d && d.error) || '保存失败')
+        updateInteractiveMenuState()
+        dshwBodyDetach(mask)
+      }).catch(function (err) {
+        saveBtn.disabled = false
+        msg.textContent = '保存失败：' + String((err && err.message) || err)
+      })
+    })
+    btns.appendChild(saveBtn)
+    card.appendChild(btns)
+    mask.appendChild(card)
+    mask.addEventListener('click', function (e) { if (e.target === mask) dshwBodyDetach(mask) })
+    dshwBodyAppend(mask)
+  } catch (err) {}
+}
+function editInteractiveItem(item, items, done) {
+  try {
+    var base = item || { prompt: '', options: [{ label: '', reply: '' }, { label: '', reply: '' }] }
+    var mask = document.createElement('div')
+    mask.className = 'dshwv-bubmask'
+    mask.style.zIndex = '31000'
+    var card = document.createElement('div')
+    card.className = 'dshwv-bubcard'
+    card.style.width = 'min(430px,calc(100vw - 16px))'
+    var title = document.createElement('div')
+    title.className = 'dshwv-bubtitle'; title.textContent = item ? '编辑互动内容' : '新增互动内容'
+    card.appendChild(title)
+    var msg = document.createElement('div')
+    msg.className = 'dshwv-hint'; msg.style.cssText = 'padding:2px 6px 4px;font-size:11px'
+    card.appendChild(msg)
+    function field(labelText, value, multiline) {
+      var r = document.createElement('div')
+      r.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:4px 6px;font-size:12px'
+      var lab = document.createElement('span'); lab.textContent = labelText; lab.style.cssText = 'flex:0 0 auto;min-width:54px'
+      r.appendChild(lab)
+      var inp = document.createElement(multiline ? 'textarea' : 'input')
+      if (multiline) inp.rows = 2
+      else inp.type = 'text'
+      inp.value = String(value || '')
+      inp.style.cssText = 'flex:1 1 auto;min-width:0;font-size:12px'
+      r.appendChild(inp)
+      card.appendChild(r)
+      return inp
+    }
+    var pIn = field('提示', base.prompt, true)
+    var l1 = field('按钮1', base.options[0].label)
+    var r1 = field('回复1', base.options[0].reply, true)
+    var l2 = field('按钮2', base.options[1].label)
+    var r2 = field('回复2', base.options[1].reply, true)
+    var btns = document.createElement('div')
+    btns.className = 'dshwv-bubbtns'
+    var cancel = document.createElement('button')
+    cancel.type = 'button'; cancel.className = 'dshwv-bubbtn dshwv-bubbtn-no'; cancel.textContent = '取消'
+    cancel.addEventListener('click', function () { dshwBodyDetach(mask) })
+    btns.appendChild(cancel)
+    var ok = document.createElement('button')
+    ok.type = 'button'; ok.className = 'dshwv-bubbtn dshwv-bubbtn-ok'; ok.textContent = '保存这条'
+    ok.addEventListener('click', function () {
+      var next = {
+        id: base.id || ('itm_' + Date.now().toString(36)),
+        enabled: base.enabled !== false,
+        prompt: String(pIn.value || '').trim(),
+        options: [
+          { label: String(l1.value || '').trim(), reply: String(r1.value || '').trim() },
+          { label: String(l2.value || '').trim(), reply: String(r2.value || '').trim() },
+        ],
+        createdAt: base.createdAt || Date.now(),
+      }
+      if (!next.prompt || !next.options[0].label || !next.options[0].reply || !next.options[1].label || !next.options[1].reply) {
+        msg.textContent = '提示、两个按钮和两段回复都要填。'
+        return
+      }
+      if (item) {
+        for (var i = 0; i < items.length; i++) if (items[i].id === item.id) items[i] = next
+      } else items.push(next)
+      done()
+      dshwBodyDetach(mask)
+    })
+    btns.appendChild(ok)
+    card.appendChild(btns)
+    mask.appendChild(card)
+    mask.addEventListener('click', function (e) { if (e.target === mask) dshwBodyDetach(mask) })
+    dshwBodyAppend(mask)
+  } catch (err) {}
+}
+function parseInteractiveImport(text) {
+  var data = JSON.parse(String(text || '').replace(/^\uFEFF/, ''))
+  var list = Array.isArray(data) ? data : (data && Array.isArray(data.items) ? data.items : [data])
+  var out = []
+  var errors = []
+  for (var i = 0; i < list.length && out.length < 500; i++) {
+    var raw = list[i] || {}
+    var prompt = String(raw.prompt || '').trim()
+    var opts = Array.isArray(raw.options) ? raw.options : []
+    if (!prompt || opts.length !== 2) { errors.push(i); continue }
+    var o = []
+    for (var j = 0; j < 2; j++) {
+      var label = String((opts[j] && opts[j].label) || '').trim()
+      var reply = String((opts[j] && opts[j].reply) || '').trim()
+      if (!label || !reply) { o = null; break }
+      o.push({ label: label, reply: reply })
+    }
+    if (!o) { errors.push(i); continue }
+    out.push({ id: raw.id || ('itm_import_' + Date.now().toString(36) + '_' + i), enabled: raw.enabled !== false, prompt: prompt, options: o, createdAt: Date.now() })
+  }
+  return { items: out, errors: errors }
+}
+function exportInteractiveItems(items) {
+  try {
+    var blob = new Blob([JSON.stringify({ version: 1, items: items }, null, 2)], { type: 'application/json' })
+    var a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = 'dshw-interactive-' + new Date().toISOString().slice(0, 10) + '.json'
+    document.body.appendChild(a); a.click()
+    setTimeout(function () { try { URL.revokeObjectURL(a.href); a.remove() } catch (err) {} }, 1000)
+  } catch (err) {}
+}
+setTimeout(function () { try { updateInteractiveMenuState() } catch (err) {} }, 2700)
 
 function usageAlertBudgetEditor(key, onSave) {
   try {
@@ -19487,7 +20007,7 @@ function bubbleCloseVisual() {
 // 清掉 textBox 里遗留的模块行(自定义场景切走/关闭时,防止叠到默认/消耗内容上)
 function bubbleClearModuleRows() {
   try {
-    var els = textBox.querySelectorAll('.dshwv-trow, .dshwv-mimg')
+    var els = textBox.querySelectorAll('.dshwv-trow, .dshwv-mimg, [data-dshw-interactive]')
     for (var i = 0; i < els.length; i++) { try { textBox.removeChild(els[i]) } catch (err) {} }
   } catch (err) {}
 }
@@ -19497,7 +20017,7 @@ function sceneOpen(kind, renderFn, ttlMs) {
   //   队列泡泡（normal/random/custom）由 bubbleShowSeqNext() 在调用前按该项的框画好。
   // v851（第 4 条）：系统泡泡现在**各自也能选框**（usageSet.<kind>.frameId）——没选才跟随保底。
   try {
-    if (kind === 'cost' || kind === 'alert' || kind === 'wait' || kind === 'proactive') {
+    if (kind === 'cost' || kind === 'alert' || kind === 'wait' || kind === 'proactive' || kind === 'interactive') {
       var sysFid = sysFrameIdOf(kind)
       if (sysFid && frameById(sysFid)) {
         // 走渲染器同一套：内置框/找不到的 id 会自动回落（resolveFrameForStep 的三级回退）
@@ -19565,6 +20085,7 @@ function bubbleAutoClose() {
   if (bubbleScene && bubbleScene.kind === 'cost') { if (whaleSysSwapNext()) return; hideCostBubble(); return }
   if (bubbleScene && bubbleScene.kind === 'alert') { if (whaleSysSwapNext()) return; hideUsageAlertBubble(); return }
   if (bubbleScene && bubbleScene.kind === 'proactive') { if (whaleSysSwapNext()) return; hideProactiveBubble(); return }
+  if (bubbleScene && bubbleScene.kind === 'interactive') { if (whaleSysSwapNext()) return; hideInteractiveBubble(); return }
   // v761（#161 C5）：等待交互泡泡是**常驻**的（sceneOpen 收到 ttl 0 不布计时器），正常永远走不到这里；
   // 这一支是防御性的（例如用户先点开等待泡泡再改设置导致 ttl 被重新布上），语义仍与其他系统泡泡一致。
   if (bubbleScene && bubbleScene.kind === 'wait') { if (whaleSysSwapNext()) return; hideWaitBubble(); return }
@@ -20840,6 +21361,15 @@ function bubbleRenderModules(mods) {
     // 该标记不可能残留成"其实没显示却以为在显示"。
     waitShown = !!(bubbleScene && bubbleScene.kind === 'wait')
     bubbleLiveMods = Array.isArray(mods) ? mods.slice() : null
+    try { textBox.style.zIndex = (bubbleScene && bubbleScene.kind === 'interactive') ? '6' : '' } catch (err) {}
+    // 互动气泡的按钮行不是模块行，bubbleClearModuleRows 不认识它 ⇒ 这里手动清掉，
+    // 否则“想看/不想看”会残留在下一句回复下面（真机第一次试就踩到了）。
+    try {
+      var oldChoiceRows = textBox.querySelectorAll('[data-dshw-interactive]')
+      for (var ci = 0; ci < oldChoiceRows.length; ci++) {
+        try { textBox.removeChild(oldChoiceRows[ci]) } catch (err) {}
+      }
+    } catch (err) {}
     // 清掉旧模块行,隐藏老三行与 gif(它们仍保留在 DOM 供普通场景使用)
     gifEl.style.display = 'none'
     labelEl.style.display = 'none'
@@ -20954,7 +21484,7 @@ function bubblePreviewInto(container, mods, widthPx, opts) {
 function whaleClick() {
   try {
     if (!bubbleOn) return
-    if (bubbleScene && (bubbleScene.kind === 'cost' || bubbleScene.kind === 'alert' || bubbleScene.kind === 'proactive')) return // 系统提醒期间点鲸鱼不动作(点泡泡才关)
+    if (bubbleScene && (bubbleScene.kind === 'cost' || bubbleScene.kind === 'alert' || bubbleScene.kind === 'proactive' || bubbleScene.kind === 'interactive')) return // 系统提醒期间点鲸鱼不动作(点泡泡才关)
     if (!bubbleShown) {
       bubbleRoundOn = true
       bubbleSeqIdx = 0
@@ -20993,6 +21523,11 @@ function bubbleNext() {
     if (bubbleScene && bubbleScene.kind === 'cost') { hideCostBubble(); return }
     if (bubbleScene && bubbleScene.kind === 'alert') { hideUsageAlertBubble(); return }
     if (bubbleScene && bubbleScene.kind === 'proactive') { hideProactiveBubble(); return }
+    if (bubbleScene && bubbleScene.kind === 'interactive') {
+      // 还在等选项时点空白不关；已经答完再点才收。
+      if (interactiveState && interactiveState.answered) hideInteractiveBubble()
+      return
+    }
     // v777：等待交互泡泡**可以点掉**（用户反馈「无法点击关闭」）。原来的实现在这里是 `return`
     //（设计意图是"别让误点把'正在等待你回答'收掉"），但真机上用户就是想把它点掉 ⇒ 改成：
     // 点泡泡 = 收起，并记住"这条挂起已被点掉"，pollWaitState 不再自动弹回（回答/批准或下一次新挂起照常）。
@@ -21008,8 +21543,8 @@ function showBubble() {
   // 通用打开(余额变化等事件):当作“开新轮从第1项”,打断当前手动/随机内容
   if (!bubbleOn) return
   if (costBubbleActive) return
-  // 主动气泡正在展示时，余额刷新之类的通用泡泡不要抢层；等它自己收掉。
-  if (bubbleScene && bubbleScene.kind === 'proactive') return
+  // 主动/互动气泡正在展示时，余额刷新之类的通用泡泡不要抢层；等它自己收掉。
+  if (bubbleScene && (bubbleScene.kind === 'proactive' || bubbleScene.kind === 'interactive')) return
   bubbleRoundOn = true
   bubbleSeqIdx = 0
   bubbleShowSeqNext()
@@ -21093,6 +21628,8 @@ function whaleSysOpenItem(item) {
     if (item.sound) {
       try { playBindingSound({ on: true, sel: String(item.sound) }, { vol: soundVolumeOf('turnCost') }, { bubble: true }) } catch (err) {}
     }
+  } else if (item.kind === 'interactive') {
+    renderInteractiveScene(item.script)
   } else {
     sceneOpen('alert', function () { bubbleRenderModules(item.mods || []) }, (item && item.ttlMs != null) ? item.ttlMs : USAGE_ALERT_TTL)
   }
@@ -21123,7 +21660,7 @@ function whaleSysPush(item) {
     }
     // 正在展示消耗泡泡时,新提醒退化为居中卡片(避免与消耗内容抢层);排队中的则按序等。
     // 主动气泡例外：它就是要排在消耗泡之后，允许先入队，等消耗泡收掉再淡切过去。
-    if (costBubbleActive && !whaleSysItem && item.kind !== 'proactive') return false
+    if (costBubbleActive && !whaleSysItem && item.kind !== 'proactive' && item.kind !== 'interactive') return false
     // v772：**每轮消耗改后入先出** —— 新一轮消耗直接置顶，原来那条退回队列（点击时按"新→旧"回看）。
     if (item.kind === 'cost' && whaleSysItem && whaleSysItem.kind === 'cost') {
       var pre2 = whaleSysItem
@@ -21147,7 +21684,7 @@ function whaleSysTick() {
     // 存在尚未入队的正展示系统泡?仅在鲸鱼空闲且无我们自己队列项时取下一个
     // v761（#161 C5）：waitShown 也必须算"正被占着"——等待泡泡是常驻的（whaleSysItem 会一直是它），
     // 正常走不到这里；但万一 item 被别的路径清掉而场景还停在等待内容上，也不能抢它的层。
-    if (costBubbleActive || waitShown || (bubbleScene && (bubbleScene.kind === 'alert' || bubbleScene.kind === 'proactive'))) return
+    if (costBubbleActive || waitShown || (bubbleScene && (bubbleScene.kind === 'alert' || bubbleScene.kind === 'proactive' || bubbleScene.kind === 'interactive'))) return
     var item = whaleSysQueue.shift()
     if (!item) return
     whaleSysOpenItem(item) // v772：展示逻辑抽成一份（tick / 淡切 / 抢占共用）
@@ -21184,9 +21721,143 @@ function hideUsageAlertBubble() {
 }
 // 白姐主动气泡：与预警/消耗同一条系统泡泡链路，只是独立场景。
 // 点击泡泡、到点自动关、被等待交互抢占时都走这里，保证队列里的下一项能继续。
+function postBubbleAck(kind) {
+  try {
+    fetch('/dsh-whale/bubbles-ack.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: String(kind || '') }),
+    }).catch(function () {})
+  } catch (err) {}
+}
 function hideProactiveBubble() {
+  postBubbleAck('comment')
   if (whaleSysSwapNext()) return
   bubbleClearAll()
+  bubbleScene = null
+  bubbleShown = false
+  bubbleRandomActive = false
+  bubbleRandomLines = null
+  bubbleLiveMods = null
+  bubbleCloseVisual()
+  whaleSysDone()
+}
+// ===== 互动气泡（最小原型）=====
+// 气泡里除了文字，还能放 2–4 个按钮；点按钮 = 在同一泡里换成下一句。
+// 先不接泡泡编辑器、不接好感度数值，只验证“按钮 → 下一句 → 关闭”的手感。
+var DSHW_INTERACTIVE_SAMPLE = {
+  prompt: '和姐姐完成那么多任务了，弟弟想不想看看姐姐的好感度呢',
+  options: [
+    { label: '想看', reply: '那当然是100啦，姐姐最喜欢弟弟了' },
+    { label: '不想看', reply: '哼，姐姐还不乐意说呢' },
+  ],
+}
+var interactiveState = null
+function openInteractiveSample() {
+  // 优先走宿主：这样“试一个”和随机触发走同一条来源选择（LLM / 固定库），
+  // 不会出现“设置里是固定库，试出来却是写死的示例”。
+  try {
+    fetch('/dsh-whale/interactive-trigger.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    }).then(function (r) {
+      if (r.status === 404) return { _fallback: true }
+      return r.json()
+    }).then(function (d) {
+      if (d && d._fallback) { openInteractiveSampleLocal(); return }
+      if (d && !d.ok) { try { console.warn('[白姐气泡] 试一个失败：' + String(d.error || '')) } catch (err) {} }
+    }).catch(function () { openInteractiveSampleLocal() })
+  } catch (err) { openInteractiveSampleLocal() }
+}
+function openInteractiveSampleLocal() {
+  showInteractiveBubble(DSHW_INTERACTIVE_SAMPLE, { force: true, eventId: '' })
+}
+function showInteractiveBubble(script, opts) {
+  try {
+    if (!bubbleOn || !script || !script.prompt) return false
+    var o = opts || {}
+    // 自动触发：只要当前有任何气泡（评论/互动/成本/等待）就直接丢弃；
+    // 手动点「聊一句」才允许顶掉当前气泡。
+    if (!o.force) {
+      if (waitShown || bubbleScene || bubbleShown || costBubbleActive) return false
+    }
+    interactiveState = { answered: false, script: script, eventId: o.eventId || '', source: o.source || '' }
+    whaleSysItem = { kind: 'interactive', rank: 3.5, ttlMs: Number(script.ttlMs) || 0, script: script, eventId: o.eventId || '' }
+    whaleSysQueue = whaleSysQueue.filter(function (q) { return !(q && q.kind === 'interactive') })
+    renderInteractiveScene(script)
+    return true
+  } catch (err) { return false }
+}
+function renderInteractiveScene(script) {
+  var ttl = Number(script && script.ttlMs) || 60000
+  sceneOpen('interactive', function () { bubbleRenderInteractive(script) }, ttl)
+}
+function bubbleRenderInteractive(script) {
+  try {
+    var s = script || {}
+    bubbleRenderModules([{ type: 'text', text: String(s.prompt || ''), size: 7, bold: true }])
+    // 文字层默认 z-index:auto，个别皮肤/框的 SVG 会压到它上面；互动泡显式抬一层，
+    // 保证提示和按钮一定在框上面（按钮自己还有 pointer-events:auto）。
+    try { textBox.style.zIndex = '6' } catch (err) {}
+    appendInteractiveActions(s)
+  } catch (err) {}
+}
+function interactiveButton(label, onClick) {
+  var b = document.createElement('button')
+  b.type = 'button'
+  b.textContent = String(label || '')
+  b.style.cssText = 'font:inherit;font-size:11px;line-height:1.2;padding:5px 12px;border-radius:999px;' +
+    'border:1px solid rgba(64,110,180,.45);background:rgba(255,255,255,.72);color:#2f4f7a;cursor:pointer;' +
+    'box-shadow:0 1px 2px rgba(40,70,120,.12);white-space:nowrap;pointer-events:auto;position:relative;z-index:5'
+  b.addEventListener('click', function (e) {
+    try { e.preventDefault(); e.stopPropagation() } catch (err) {}
+    onClick()
+  })
+  return b
+}
+function appendInteractiveActions(script) {
+  try {
+    var box = document.createElement('div')
+    box.setAttribute('data-dshw-interactive', '1')
+    box.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;margin-top:7px;pointer-events:auto;position:relative;z-index:5'
+    var opts = Array.isArray(script && script.options) ? script.options.slice(0, 2) : []
+    for (var i = 0; i < opts.length; i++) {
+      (function (opt, idx) {
+        if (!opt || !opt.label) return
+        box.appendChild(interactiveButton(opt.label, function () { chooseInteractive(opt, idx) }))
+      })(opts[i], i)
+    }
+    textBox.appendChild(box)
+  } catch (err) {}
+}
+function chooseInteractive(opt, idx) {
+  try {
+    if (interactiveState) interactiveState.answered = true
+    var reply = String((opt && opt.reply) || '')
+    bubbleRenderModules([{ type: 'text', text: reply, size: 7, bold: true }])
+    // 选完之后就是普通泡泡：10 秒后自动收，点泡泡也能收；不再放第三个按钮。
+    try { if (bubbleScene) bubbleScene.ttlMs = 10000; bubbleResetTtl() } catch (err) {}
+    var evId = interactiveState && interactiveState.eventId
+    if (evId) {
+      try {
+        fetch('/dsh-whale/interactive-choice.json', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: evId, chosen: Number(idx) }),
+        }).catch(function () {})
+      } catch (err) {}
+    }
+  } catch (err) {}
+}
+function hideInteractiveBubble() {
+  postBubbleAck('interactive')
+  // 超时/点掉时把选项行一起清掉；否则按钮节点会留在已收起的泡泡里，
+  // 下一次场景切换前被 querySelector 误判成“还在显示”。
+  try { bubbleClearModuleRows() } catch (err) {}
+  if (whaleSysSwapNext()) return
+  bubbleClearAll()
+  interactiveState = null
   bubbleScene = null
   bubbleShown = false
   bubbleRandomActive = false
@@ -24666,7 +25337,55 @@ function pollProactive() {
       .catch(function () {})
   } catch (err) {}
 }
-setInterval(function () { pollLastTurn(); pollWaitState(); pollProactive() }, 1000)
+// —— 互动气泡：事件轮询 + 页面可见心跳 ——
+var INTERACTIVE_EVENTS_URL = '/dsh-whale/interactive-events.json'
+var interactiveSeq = 0
+var interactiveAligned = false
+try {
+  var storedInteractiveSeq = Number(localStorage.getItem('dshw-interactive-seq') || 0)
+  if (isFinite(storedInteractiveSeq) && storedInteractiveSeq > 0) { interactiveSeq = storedInteractiveSeq; interactiveAligned = true }
+} catch (err) {}
+function pollInteractiveEvents() {
+  try {
+    fetch(INTERACTIVE_EVENTS_URL + '?since=' + encodeURIComponent(String(interactiveSeq)), { cache: 'no-store' })
+      .then(function (r) { return r.json() })
+      .then(function (d) {
+        if (!d || !d.ok) return
+        if (d.reset) {
+          interactiveSeq = 0
+          try { localStorage.setItem('dshw-interactive-seq', '0') } catch (err) {}
+        }
+        var list = Array.isArray(d.events) ? d.events : []
+        for (var i = 0; i < list.length; i++) {
+          var ev = list[i] || {}
+          var id = Number(ev.id) || 0
+          if (id <= interactiveSeq) continue
+          interactiveSeq = id
+          try { localStorage.setItem('dshw-interactive-seq', String(id)) } catch (err) {}
+          var age = Date.now() - (Number(ev.ts) || 0)
+          if (age > (Number(ev.ttlMs) || 60000) + 10000) continue
+          var ok = showInteractiveBubble({ prompt: ev.prompt, options: ev.options, ttlMs: ev.ttlMs }, { eventId: id, source: ev.source })
+          if (!ok) postBubbleAck('interactive')
+        }
+      })
+      .catch(function () {})
+  } catch (err) {}
+}
+function sendInteractivePresence() {
+  try {
+    fetch('/dsh-whale/interactive-presence.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ visible: !document.hidden }),
+    }).catch(function () {})
+  } catch (err) {}
+}
+try {
+  sendInteractivePresence()
+  setInterval(sendInteractivePresence, 20000)
+  document.addEventListener('visibilitychange', function () { sendInteractivePresence() })
+} catch (err) {}
+setInterval(function () { pollLastTurn(); pollWaitState(); pollProactive(); pollInteractiveEvents() }, 1000)
 }
 // 主界面检测通过（或稍后由 MutationObserver 检测到）后执行挂件初始化；非主界面不启动
 try { dshwTryStart(true) } catch (err) {}

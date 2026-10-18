@@ -30,6 +30,7 @@ function makeBubbleHarness() {
     'function whaleSysSwapNext() { return false }',
     'function bubbleClearAll() { __cleared++ }',
     'function bubbleCloseVisual() {}',
+    'function postBubbleAck() {}',
     'var bubbleScene = null',
     'var bubbleShown = false',
     'var bubbleRandomActive = false',
@@ -171,6 +172,58 @@ test('host seq reset replays only recent events', async () => {
   await tick()
   assert.deepEqual(h.shown, [1])
   assert.equal(h.seq, 1)
+})
+
+test('interactive JSON import keeps only items with exactly two options', () => {
+  const code = [
+    extract('parseInteractiveImport'),
+    'return { parse: parseInteractiveImport }',
+  ].join('\n')
+  const h = new Function(code)()
+  const r = h.parse(JSON.stringify([
+    { prompt: '好问题', options: [{ label: '甲甲', reply: '甲回复甲回复' }, { label: '乙乙', reply: '乙回复乙回复' }] },
+    { prompt: '坏问题', options: [{ label: '甲甲', reply: '甲回复甲回复' }] },
+  ]))
+  assert.equal(r.items.length, 1)
+  assert.equal(r.errors.length, 1)
+  assert.equal(r.items[0].options.length, 2)
+})
+
+test('interactive bubble shows when free and drops while a question is pending', () => {
+  const code = [
+    'var bubbleOn = true',
+    'var waitShown = false',
+    'var bubbleScene = null',
+    'var bubbleShown = false',
+    'var costBubbleActive = false',
+    'var interactiveState = null',
+    'var whaleSysItem = null',
+    'var whaleSysQueue = []',
+    'var __rendered = null',
+    'var __renders = 0',
+    'var __pushed = null',
+    'function renderInteractiveScene(script) { __rendered = script; __renders++ }',
+    'function whaleSysPush(item) { __pushed = item; return true }',
+    extract('showInteractiveBubble'),
+    'return {',
+    '  show: showInteractiveBubble,',
+    '  get rendered() { return __rendered },',
+    '  get renders() { return __renders },',
+    '  get pushed() { return __pushed },',
+    '  get item() { return whaleSysItem },',
+    '  get state() { return interactiveState },',
+    '  set wait(v) { waitShown = v },',
+    '}',
+  ].join('\n')
+  const h = new Function(code)()
+  assert.equal(h.show({ prompt: '问一句' }), true)
+  assert.equal(h.rendered.prompt, '问一句')
+  assert.equal(h.item.kind, 'interactive')
+  assert.equal(h.state.answered, false)
+
+  h.wait = true
+  assert.equal(h.show({ prompt: '排队' }), false)
+  assert.equal(h.renders, 1)
 })
 
 test('hat config merges saved localStorage values over defaults', () => {

@@ -209,6 +209,16 @@ test('mid-sentence laughter and a fresh leading laugh are both allowed', async (
   fs.rmSync(service._dir, { recursive: true, force: true })
 })
 
+test('comment bubble drops when another bubble holds the occupancy lock', async () => {
+  const service = makeService({ isOccupied: () => true })
+  service.updateConfig({ enabled: true, probability: 1, minIntervalSec: 0, maxPerHour: 0, maxPerDay: 0, minTurnChars: 0 })
+  pushTurn(service)
+  await new Promise((r) => setTimeout(r, 15))
+  assert.equal(service._state.events.length, 0)
+  assert.ok(service._state.recent.some((r) => r.reason === 'occupied'))
+  fs.rmSync(service._dir, { recursive: true, force: true })
+})
+
 test('service generates one event for a completed human turn', async () => {
   const service = makeService()
   service.updateConfig({ enabled: true, probability: 1, minIntervalSec: 0, maxPerHour: 0, maxPerDay: 0, minTurnChars: 0 })
