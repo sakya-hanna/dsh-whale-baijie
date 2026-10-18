@@ -20723,6 +20723,8 @@ function showBubble() {
   // 通用打开(余额变化等事件):当作“开新轮从第1项”,打断当前手动/随机内容
   if (!bubbleOn) return
   if (costBubbleActive) return
+  // 主动气泡正在展示时，余额刷新之类的通用泡泡不要抢层；等它自己收掉。
+  if (bubbleScene && bubbleScene.kind === 'proactive') return
   bubbleRoundOn = true
   bubbleSeqIdx = 0
   bubbleShowSeqNext()
@@ -20802,6 +20804,10 @@ function whaleSysOpenItem(item) {
     sceneOpen('proactive', function () {
       bubbleRenderModules([{ type: 'text', text: String(item.text || ''), size: 7, bold: true }])
     }, pTtl > 0 ? pTtl : 0)
+    // 语音预留：宿主把 TTS 片段挂到 sound 上时，复用既有气泡音频占用逻辑（播完才收泡）。
+    if (item.sound) {
+      try { playBindingSound({ on: true, sel: String(item.sound) }, { vol: soundVolumeOf('turnCost') }, { bubble: true }) } catch (err) {}
+    }
   } else {
     sceneOpen('alert', function () { bubbleRenderModules(item.mods || []) }, (item && item.ttlMs != null) ? item.ttlMs : USAGE_ALERT_TTL)
   }
@@ -20830,8 +20836,9 @@ function whaleSysPush(item) {
       whaleSysOpenItem(item)
       return true
     }
-    // 正在展示消耗泡泡时,新提醒退化为居中卡片(避免与消耗内容抢层);排队中的则按序等
-    if (costBubbleActive && !whaleSysItem) return false
+    // 正在展示消耗泡泡时,新提醒退化为居中卡片(避免与消耗内容抢层);排队中的则按序等。
+    // 主动气泡例外：它就是要排在消耗泡之后，允许先入队，等消耗泡收掉再淡切过去。
+    if (costBubbleActive && !whaleSysItem && item.kind !== 'proactive') return false
     // v772：**每轮消耗改后入先出** —— 新一轮消耗直接置顶，原来那条退回队列（点击时按"新→旧"回看）。
     if (item.kind === 'cost' && whaleSysItem && whaleSysItem.kind === 'cost') {
       var pre2 = whaleSysItem
@@ -24337,6 +24344,7 @@ function showProactiveBubble(ev) {
       ttlMs: ttl,
       text: String(ev.text),
       emotion: String(ev.emotion || 'calm'),
+      sound: ev.sound ? String(ev.sound) : '',
       frameId: '',
       proactiveId: ev.id,
     })
