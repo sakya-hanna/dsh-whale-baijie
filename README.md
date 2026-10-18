@@ -1,8 +1,37 @@
-# DSH 小鲸鱼记账挂件（DeepSeek Balance Whale Widget）
+# 白姐桌宠挂件（dsh-whale-baijie）
 
-![DSH 小鲸鱼记账挂件](assets/DSH2.png)
+![白姐桌宠挂件](assets/DSH2.png)
 
-DeepSeek Harness（DSH）Web 界面右下角的常驻挂件：小鲸鱼气泡图 + DeepSeek API 余额 + 今日已用 + 每轮对话消耗，并且**泡泡内容可以完全自定义**（点击序列、模块化排版、并列加权出泡、随机语句/随机图片）。标准 DSH bundle 插件，`dsh plugin` 一键安装，无需任何会话令牌。
+> 基于 [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget)（MIT）的白姐（小伯白）定制分支。
+> 本分支新增：**每轮对话结束后按可配置概率（0–1）让白姐主动冒泡**，气泡内容由**当前会话模型**根据「弟弟这轮问了什么 + 助手这轮做了什么」生成；独立冒泡，排在每轮消耗提示之后；带独立设置页、频率限制、静默时段、JSON 校验与语音接口预留。
+>
+> 安装（本分支）：
+>
+> ```powershell
+> dsh plugin --profile web add github:sakya-hanna/dsh-whale-baijie
+> ```
+>
+> 或本地开发：
+>
+> ```powershell
+> dsh plugin --profile web add link:<本仓库绝对路径>
+> ```
+>
+> 升级前请先移除上游同名挂件（如果装过）：`dsh plugin --profile web remove dsh-whale-widget`。
+> 包名已改为 `dsh-whale-baijie`，bundle id 同步修改，避免与上游 npm 包冲突。
+
+---
+
+## 本分支的主动气泡
+
+- **触发**：顶层会话、真人提问、`turn/end` 正常完成；先过滤短轮次，再掷概率，再做最短间隔/每小时/每日/静默时段检查。
+- **内容**：把「弟弟的提问 + 助手这一轮的文字 + 工具名/参数摘要 + token/耗时」交给当前会话模型，要求只回一条短 JSON；`review` 模式允许模型说「这轮没什么好说的」，`always` 模式抽中必说。
+- **展示**：独立系统泡泡，rank 排在每轮消耗提示之后、提问/授权提示之前；点泡泡可收起，到点自动关。
+- **语音**：`voice.enabled` + `provider !== 'none'` 时，先等 `synthesize()` 返回音频片段再发布气泡；当前 provider 为 `none`，接口已留好。
+- **配置**：主菜单 →「白姐主动说话」→「设置」；落盘 `$DSH_HOME/.dshw-proactive.json`。
+- **隐私**：默认只发本轮；默认不带工具完整输出；路径/密钥打码；可在面板里改成指定模型或关闭。
+
+> 以下是上游 README 的原有内容（余额、记账、泡泡、音效等），其中安装命令里的包名 `dsh-whale-widget` 属于上游，本分支请用上面的 `dsh-whale-baijie` 命令替换。
 
 > ⚠️ **Codex 版小鲸鱼已迁至独立仓库** → <https://github.com/Yang-huai406/Codex-Whale-Public>（**已安装用户无需重装**；详见下方「两条分支怎么选」）
 <!-- 迁移横幅（v0.3.19 起）：迁移稳定后（约 2026-11，或发过 1–2 个版本）可只删这一行 blockquote，保留下方分支表与「致谢」——别让它长期占着第一屏 -->

@@ -1,33 +1,39 @@
 {
-  "name": "dsh-whale-widget",
-  "version": "0.4.2",
-  "description": "DSH Web 界面右下角的 DeepSeek 余额小鲸鱼挂件:余额/今日已用/峰谷定价、自定义泡泡点击序列(文本/余额/今日/峰谷/图片/随机语句与并列加权选择)、逐行样式与字体、悬浮快捷编辑、音效与每轮消耗、自定义角色/动图/音效、吸附与翻转自定义",
+  "name": "dsh-whale-baijie",
+  "version": "0.5.0",
+  "description": "DSH Web 界面右下角的白姐（小伯白）桌宠挂件：在 dsh-whale-widget 基础上加入「每轮对话后按概率主动冒泡，由当前会话模型决定说什么」，保留余额/今日已用/峰谷、自定义泡泡、音效与语音接口",
   "keywords": [
     "dsh",
     "dsh-plugin",
     "deepseek-harness",
     "balance",
-    "widget"
+    "widget",
+    "baijie",
+    "proactive"
   ],
   "type": "module",
   "main": "lib/index.js",
   "icon": "./icon.png",
+  "scripts": {
+    "test": "node test/proactive.test.mjs && node test/frontend-proactive.test.mjs && node test/proactive-routes.test.mjs && node test/host-integration.test.mjs"
+  },
   "files": [
     "lib",
     "assets",
     "icon.png",
     "cordis.patch.yml",
     "README.md",
-    "PROVENANCE.md"
+    "PROVENANCE.md",
+    "NOTICE.md"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget.git"
+    "url": "git+https://github.com/sakya-hanna/dsh-whale-baijie.git"
   },
   "bugs": {
-    "url": "https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget/issues"
+    "url": "https://github.com/sakya-hanna/dsh-whale-baijie/issues"
   },
-  "homepage": "https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget#readme",
+  "homepage": "https://github.com/sakya-hanna/dsh-whale-baijie#readme",
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"

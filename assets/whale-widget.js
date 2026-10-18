@@ -2106,6 +2106,22 @@ soundPanelBtn.textContent = '音效/提示泡泡设置'
 soundPanelBtn.title = '提示与音效设置：按压音量/音效组、每轮消耗提示、提问提示、授权提示'
 soundPanelBtn.addEventListener('click', function (e) { e.stopPropagation(); openSoundSettingsPanel() })
 row2.appendChild(soundPanelBtn)
+// —— 白姐主动气泡入口：状态摘要 + 「设置」按钮（面板见 openProactivePanel）——
+var rowProactive = menuRow()
+rowProactive.appendChild(menuLabel('白姐主动说话'))
+var proactiveStateEl = document.createElement('span')
+proactiveStateEl.className = 'dshwv-volpct'
+proactiveStateEl.textContent = '已关闭'
+proactiveStateEl.title = '主动气泡当前状态：关闭 / 触发概率'
+rowProactive.appendChild(proactiveStateEl)
+var proactiveBtn = document.createElement('button')
+proactiveBtn.type = 'button'
+proactiveBtn.className = 'dshwv-roleimport'
+proactiveBtn.style.flex = '1'
+proactiveBtn.textContent = '设置'
+proactiveBtn.title = '打开「白姐主动说话」设置：概率、模式、频率、模型、上下文、提示词、语音预留'
+proactiveBtn.addEventListener('click', function (e) { e.stopPropagation(); openProactivePanel() })
+rowProactive.appendChild(proactiveBtn)
 var row6 = menuRow()
 row6.appendChild(menuLabel('气泡全局开关'))
 row6.appendChild(bubbleToggle)
@@ -2168,6 +2184,7 @@ roleFileInput.addEventListener('change', function () { onRoleFileChosen(roleFile
 menuBox.appendChild(rowRole)
 menuBox.appendChild(row1)
 menuBox.appendChild(row2)
+menuBox.appendChild(rowProactive)
 menuBox.appendChild(row6)
 // v762：「每轮消耗提示」整行**不再挂到主菜单**（菜单里已再无此行，配置入口移进「全局设置」面板）。
 // ⚠️ row7 及其内部控件（turnCostToggle / turnCostCustomBtn）的创建**必须原样保留**：
@@ -4161,6 +4178,423 @@ function openSoundSettingsPanel() {
     dshwBodyAppend(mask)
   } catch (err) {}
 }
+// ===== 白姐主动气泡设置面板 =====
+// 与「提示与音效设置」「自定义泡泡」同一套卡片/按钮/遮罩样式；
+// 配置落 .dshw-proactive.json（宿主 proactive.json 路由），窗口内只改 buf，点保存才 PUT。
+var PROACTIVE_URL = '/dsh-whale/proactive.json'
+var proactiveDefaultsCache = null
+var proactiveLastTestText = ''
+function proactiveClone(obj) {
+  try { return JSON.parse(JSON.stringify(obj)) } catch (err) { return obj }
+}
+function updateProactiveMenuState() {
+  try {
+    fetch(PROACTIVE_URL, { cache: 'no-store' })
+      .then(function (r) { return r.json() })
+      .then(function (d) {
+        if (!d || !d.ok || !d.config) return
+        if (typeof proactiveStateEl === 'undefined' || !proactiveStateEl) return
+        var c = d.config
+        proactiveStateEl.textContent = c.enabled ? (Math.round(Number(c.probability || 0) * 100) + '%') : '已关闭'
+        proactiveStateEl.title = c.enabled
+          ? ('主动气泡已开启：概率 ' + Math.round(Number(c.probability || 0) * 100) + '% · ' + (c.mode === 'always' ? '抽中必说' : '模型可拒绝'))
+          : '主动气泡已关闭'
+      })
+      .catch(function () {})
+  } catch (err) {}
+}
+function openProactivePanel() {
+  fetch(PROACTIVE_URL, { cache: 'no-store' })
+    .then(function (r) { return r.json() })
+    .then(function (d) {
+      if (!d || !d.ok) throw new Error((d && d.error) || '读取主动气泡配置失败')
+      proactiveDefaultsCache = d.defaults || null
+      buildProactivePanel(d.config || {}, d.defaults || {}, d.stats || {}, d.recent || [])
+    })
+    .catch(function (err) { buildProactiveError(err) })
+}
+function buildProactiveError(err) {
+  try {
+    var mask = document.createElement('div')
+    mask.className = 'dshwv-bubmask'
+    mask.style.zIndex = '30000'
+    var card = document.createElement('div')
+    card.className = 'dshwv-bubcard'
+    card.style.width = 'min(420px,calc(100vw - 16px))'
+    var title = document.createElement('div')
+    title.className = 'dshwv-bubtitle'
+    title.textContent = '白姐主动说话'
+    card.appendChild(title)
+    var p = document.createElement('div')
+    p.className = 'dshwv-hint'
+    p.style.padding = '8px 6px'
+    p.textContent = '读取配置失败：' + String((err && err.message) || err)
+    card.appendChild(p)
+    var btns = document.createElement('div')
+    btns.className = 'dshwv-bubbtns'
+    var close = document.createElement('button')
+    close.type = 'button'
+    close.className = 'dshwv-bubbtn dshwv-bubbtn-no'
+    close.textContent = '关闭'
+    close.addEventListener('click', function () { dshwBodyDetach(mask) })
+    btns.appendChild(close)
+    card.appendChild(btns)
+    mask.appendChild(card)
+    mask.addEventListener('click', function (e) { if (e.target === mask) dshwBodyDetach(mask) })
+    dshwBodyAppend(mask)
+  } catch (e2) {}
+}
+function buildProactivePanel(cfg, defaults, stats, recent) {
+  try {
+    var buf = proactiveClone(cfg || {})
+    if (!proactiveDefaultsCache) proactiveDefaultsCache = proactiveClone(defaults || {})
+    var mask = document.createElement('div')
+    mask.className = 'dshwv-bubmask'
+    mask.style.zIndex = '30000'
+    var card = document.createElement('div')
+    card.className = 'dshwv-bubcard'
+    card.style.width = 'min(470px,calc(100vw - 16px))'
+    card.style.maxHeight = '88vh'
+    card.style.overflow = 'hidden auto'
+    var title = document.createElement('div')
+    title.className = 'dshwv-bubtitle'
+    title.textContent = '白姐主动说话'
+    card.appendChild(title)
+    var status = document.createElement('div')
+    status.className = 'dshwv-hint'
+    status.style.cssText = 'padding:2px 6px 6px;font-size:11px;line-height:1.5'
+    status.textContent = '已展示 ' + (Number(stats.shown) || 0) + ' · 模型拒绝 ' + (Number(stats.declined) || 0) +
+      ' · 失败 ' + (Number(stats.failed) || 0) + ' · 跳过 ' + (Number(stats.skipped) || 0)
+    card.appendChild(status)
+    var body = document.createElement('div')
+    card.appendChild(body)
+    var testOut = document.createElement('div')
+    testOut.className = 'dshwv-hint'
+    testOut.style.cssText = 'padding:6px;font-size:11px;white-space:pre-wrap;min-height:18px'
+    testOut.textContent = '提示：点「试说一句」会用当前表单配置生成一次，不占冷却、不写统计。'
+    card.appendChild(testOut)
+
+    function close() { try { dshwBodyDetach(mask) } catch (err) {} }
+    function section(text) {
+      var el = document.createElement('div')
+      el.className = 'dshwv-bubsec'
+      el.textContent = text
+      el.style.marginTop = '10px'
+      body.appendChild(el)
+      return el
+    }
+    function row(labelText, node, hint) {
+      var r = document.createElement('div')
+      r.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:12px;line-height:1.4'
+      var lab = document.createElement('span')
+      lab.textContent = labelText
+      lab.style.cssText = 'flex:0 0 auto;min-width:76px'
+      r.appendChild(lab)
+      if (node) {
+        node.style.flex = '1 1 auto'
+        node.style.minWidth = '0'
+        r.appendChild(node)
+      }
+      if (hint) {
+        var h = document.createElement('span')
+        h.className = 'dshwv-hint'
+        h.textContent = hint
+        h.style.cssText = 'font-size:10px;opacity:.75;flex:0 1 auto'
+        r.appendChild(h)
+      }
+      body.appendChild(r)
+      return r
+    }
+    function check(labelText, get, set, hint) {
+      var wrap = document.createElement('label')
+      wrap.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px'
+      var inp = document.createElement('input')
+      inp.type = 'checkbox'
+      inp.className = 'dshwv-check'
+      inp.checked = !!get()
+      inp.addEventListener('change', function () { set(!!inp.checked) })
+      wrap.appendChild(inp)
+      var sp = document.createElement('span')
+      sp.textContent = labelText
+      wrap.appendChild(sp)
+      row('', wrap, hint)
+      return inp
+    }
+    function num(labelText, get, set, min, max, step, hint) {
+      var inp = document.createElement('input')
+      inp.type = 'number'
+      inp.className = 'dshwv-number'
+      inp.min = String(min)
+      inp.max = String(max)
+      inp.step = String(step == null ? 1 : step)
+      inp.value = String(get())
+      inp.style.maxWidth = '96px'
+      inp.addEventListener('input', function () {
+        var n = Number(inp.value)
+        if (isFinite(n)) set(n)
+      })
+      row(labelText, inp, hint)
+      return inp
+    }
+    function textInput(labelText, get, set, placeholder) {
+      var inp = document.createElement('input')
+      inp.type = 'text'
+      inp.value = String(get() == null ? '' : get())
+      inp.placeholder = placeholder || ''
+      inp.className = 'dshwv-number'
+      inp.style.width = '100%'
+      inp.addEventListener('input', function () { set(inp.value) })
+      row(labelText, inp)
+      return inp
+    }
+    function select(labelText, options, get, set, hint) {
+      var sel = document.createElement('select')
+      sel.className = 'dshwv-sound'
+      sel.style.maxWidth = '100%'
+      for (var i = 0; i < options.length; i++) {
+        var o = document.createElement('option')
+        o.value = options[i].value
+        o.textContent = options[i].label
+        if (String(get()) === options[i].value) o.selected = true
+        sel.appendChild(o)
+      }
+      sel.addEventListener('change', function () { set(sel.value) })
+      row(labelText, sel, hint)
+      return sel
+    }
+    function range(labelText, get, set, fmt) {
+      var wrap = document.createElement('span')
+      wrap.style.cssText = 'display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0'
+      var inp = document.createElement('input')
+      inp.type = 'range'
+      inp.min = '0'
+      inp.max = '100'
+      inp.step = '5'
+      inp.className = 'dshwv-range'
+      inp.value = String(Math.round(Number(get()) * 100))
+      var pct = document.createElement('span')
+      pct.className = 'dshwv-volpct'
+      pct.textContent = Math.round(Number(get()) * 100) + '%'
+      inp.addEventListener('input', function () {
+        var v = Math.max(0, Math.min(100, Number(inp.value))) / 100
+        set(v)
+        pct.textContent = Math.round(v * 100) + '%'
+      })
+      wrap.appendChild(inp)
+      wrap.appendChild(pct)
+      row(labelText, wrap, fmt)
+      return inp
+    }
+    function details(titleText, openState) {
+      var d = document.createElement('details')
+      d.open = !!openState
+      var s = document.createElement('summary')
+      s.className = 'dshwv-bubsec'
+      s.style.cursor = 'pointer'
+      s.textContent = titleText
+      d.appendChild(s)
+      body.appendChild(d)
+      return d
+    }
+
+    function renderBody() {
+      body.innerHTML = ''
+      section('触发')
+      check('启用主动气泡', function () { return buf.enabled }, function (v) { buf.enabled = v }, '关闭时零监听、零调用')
+      range('触发概率', function () { return buf.probability }, function (v) { buf.probability = v }, '实际冒泡率 ≈ 概率 × 模型通过率')
+      select('判定模式', [
+        { value: 'review', label: 'review · 模型可放弃（推荐）' },
+        { value: 'always', label: 'always · 抽中必说' },
+      ], function () { return buf.mode }, function (v) { buf.mode = v }, '')
+      num('短轮次阈值', function () { return buf.minTurnChars }, function (v) { buf.minTurnChars = v }, 0, 500, 5, '少于这么多字不触发')
+
+      section('频率')
+      num('最短间隔', function () { return buf.minIntervalSec }, function (v) { buf.minIntervalSec = v }, 0, 3600, 5, '秒')
+      num('每小时上限', function () { return buf.maxPerHour }, function (v) { buf.maxPerHour = v }, 0, 120, 1, '0=不限')
+      num('每日上限', function () { return buf.maxPerDay }, function (v) { buf.maxPerDay = v }, 0, 500, 1, '0=不限')
+      check('启用静默时段', function () { return buf.quietHours && buf.quietHours.enabled }, function (v) { if (!buf.quietHours) buf.quietHours = {}; buf.quietHours.enabled = v }, '')
+      var qs = document.createElement('input')
+      qs.type = 'time'
+      qs.value = (buf.quietHours && buf.quietHours.start) || '23:00'
+      qs.addEventListener('change', function () { if (!buf.quietHours) buf.quietHours = {}; buf.quietHours.start = qs.value })
+      var qe = document.createElement('input')
+      qe.type = 'time'
+      qe.value = (buf.quietHours && buf.quietHours.end) || '08:00'
+      qe.addEventListener('change', function () { if (!buf.quietHours) buf.quietHours = {}; buf.quietHours.end = qe.value })
+      var qwrap = document.createElement('span')
+      qwrap.style.cssText = 'display:flex;align-items:center;gap:6px'
+      qwrap.appendChild(qs)
+      qwrap.appendChild(document.createTextNode('至'))
+      qwrap.appendChild(qe)
+      row('静默时段', qwrap, '跨午夜也支持')
+
+      section('模型')
+      var modelSel = select('模型来源', [
+        { value: 'session', label: '复用当前会话模型（推荐）' },
+        { value: 'fixed', label: '指定 provider / model' },
+      ], function () { return buf.model && buf.model.mode }, function (v) {
+        if (!buf.model) buf.model = {}
+        buf.model.mode = v
+        renderBody()
+      }, '')
+      if (buf.model && buf.model.mode === 'fixed') {
+        textInput('provider', function () { return buf.model.provider }, function (v) { buf.model.provider = v }, '例如 deepseek')
+        textInput('model', function () { return buf.model.model }, function (v) { buf.model.model = v }, '例如 deepseek-flash')
+      }
+      num('超时', function () { return buf.model && buf.model.timeoutMs }, function (v) { if (!buf.model) buf.model = {}; buf.model.timeoutMs = v }, 3000, 60000, 1000, '毫秒')
+      num('输出上限', function () { return buf.model && buf.model.maxTokens }, function (v) { if (!buf.model) buf.model = {}; buf.model.maxTokens = v }, 40, 800, 20, 'tokens')
+
+      section('上下文')
+      num('字符上限', function () { return buf.context && buf.context.maxChars }, function (v) { if (!buf.context) buf.context = {}; buf.context.maxChars = v }, 300, 6000, 100, '本轮材料')
+      check('带工具调用名/参数', function () { return buf.context && buf.context.includeToolCalls }, function (v) { if (!buf.context) buf.context = {}; buf.context.includeToolCalls = v }, '')
+      check('带工具完整输出', function () { return buf.context && buf.context.includeToolResults }, function (v) { if (!buf.context) buf.context = {}; buf.context.includeToolResults = v }, '隐私风险，默认关')
+      check('路径/密钥打码', function () { return buf.context && buf.context.maskPaths }, function (v) { if (!buf.context) buf.context = {}; buf.context.maskPaths = v }, '')
+
+      section('气泡')
+      num('停留秒数', function () { return buf.bubble && buf.bubble.ttlSec }, function (v) { if (!buf.bubble) buf.bubble = {}; buf.bubble.ttlSec = v }, 0, 120, 1, '0=不自动关')
+
+      section('语音（预留）')
+      var voiceChk = check('语音就绪后再出泡', function () { return buf.voice && buf.voice.enabled }, function (v) { if (!buf.voice) buf.voice = {}; buf.voice.enabled = v }, '当前 provider=none，需实现合成器')
+      voiceChk.disabled = true
+      var vp = document.createElement('div')
+      vp.className = 'dshwv-hint'
+      vp.style.cssText = 'padding:2px 6px 6px;font-size:10px;line-height:1.5;opacity:.8'
+      vp.textContent = '接口已预留：voice provider 接上后，会等 synthesize() 返回 fragId 才发布气泡；前端已有音频 hold，播完才收泡。'
+      body.appendChild(vp)
+
+      var pd = details('提示词', false)
+      var sysTa = document.createElement('textarea')
+      sysTa.value = String((buf.prompt && buf.prompt.system) || '')
+      sysTa.rows = 6
+      sysTa.style.cssText = 'width:100%;box-sizing:border-box;font-size:11px;line-height:1.45;margin:4px 0'
+      sysTa.addEventListener('input', function () { if (!buf.prompt) buf.prompt = {}; buf.prompt.system = sysTa.value })
+      pd.appendChild(sysTa)
+      var userTa = document.createElement('textarea')
+      userTa.value = String((buf.prompt && buf.prompt.user) || '')
+      userTa.rows = 5
+      userTa.style.cssText = 'width:100%;box-sizing:border-box;font-size:11px;line-height:1.45;margin:4px 0'
+      userTa.addEventListener('input', function () { if (!buf.prompt) buf.prompt = {}; buf.prompt.user = userTa.value })
+      pd.appendChild(userTa)
+      var resetPrompt = document.createElement('button')
+      resetPrompt.type = 'button'
+      resetPrompt.className = 'dshwv-bubbtn dshwv-bubbtn-no'
+      resetPrompt.textContent = '恢复默认提示词'
+      resetPrompt.style.margin = '2px 0 6px'
+      resetPrompt.addEventListener('click', function () {
+        var d = proactiveDefaultsCache || {}
+        if (!buf.prompt) buf.prompt = {}
+        buf.prompt.system = d.prompt ? d.prompt.system : ''
+        buf.prompt.user = d.prompt ? d.prompt.user : ''
+        renderBody()
+      })
+      pd.appendChild(resetPrompt)
+
+      var rd = details('最近记录', false)
+      if (!recent || !recent.length) {
+        var empty = document.createElement('div')
+        empty.className = 'dshwv-hint'
+        empty.style.cssText = 'padding:4px 6px;font-size:10px'
+        empty.textContent = '还没有记录。'
+        rd.appendChild(empty)
+      } else {
+        for (var ri = Math.max(0, recent.length - 8); ri < recent.length; ri++) {
+          var rec = recent[ri] || {}
+          var line = document.createElement('div')
+          line.className = 'dshwv-hint'
+          line.style.cssText = 'padding:2px 6px;font-size:10px;line-height:1.5'
+          line.textContent = '[' + (rec.status || '') + '] ' + (rec.text || rec.reason || rec.error || '') +
+            (rec.ms ? ' · ' + rec.ms + 'ms' : '')
+          rd.appendChild(line)
+        }
+      }
+    }
+    renderBody()
+
+    var btns = document.createElement('div')
+    btns.className = 'dshwv-bubbtns'
+    var cancelBtn = document.createElement('button')
+    cancelBtn.type = 'button'
+    cancelBtn.className = 'dshwv-bubbtn dshwv-bubbtn-no'
+    cancelBtn.textContent = '取消'
+    cancelBtn.addEventListener('click', close)
+    btns.appendChild(cancelBtn)
+    var resetBtn = document.createElement('button')
+    resetBtn.type = 'button'
+    resetBtn.className = 'dshwv-bubbtn dshwv-bubbtn-no'
+    resetBtn.textContent = '恢复默认'
+    resetBtn.addEventListener('click', function () {
+      buf = proactiveClone(proactiveDefaultsCache || {})
+      renderBody()
+      testOut.textContent = '已恢复默认值（还没保存）。'
+    })
+    btns.appendChild(resetBtn)
+    var testBtn = document.createElement('button')
+    testBtn.type = 'button'
+    testBtn.className = 'dshwv-bubbtn dshwv-bubbtn-no'
+    testBtn.textContent = '试说一句'
+    testBtn.addEventListener('click', function () {
+      testOut.textContent = '生成中…'
+      proactiveLastTestText = ''
+      fetch('/dsh-whale/proactive-test.json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: buf }),
+      }).then(function (r) { return r.json() }).then(function (d) {
+        if (!d || !d.ok) {
+          testOut.textContent = '失败：' + String((d && d.error) || '未知错误')
+          return
+        }
+        if (d.speak === false) {
+          testOut.textContent = '模型选择这轮不说（review 模式）。'
+          return
+        }
+        proactiveLastTestText = String(d.text || '')
+        testOut.textContent = '“' + d.text + '” · ' + (d.ms || 0) + 'ms' + (d.format === 'text' ? ' · 非 JSON 兜底' : '')
+      }).catch(function (err) {
+        testOut.textContent = '失败：' + String((err && err.message) || err)
+      })
+    })
+    btns.appendChild(testBtn)
+    var previewBtn = document.createElement('button')
+    previewBtn.type = 'button'
+    previewBtn.className = 'dshwv-bubbtn dshwv-bubbtn-no'
+    previewBtn.textContent = '预览气泡'
+    previewBtn.addEventListener('click', function () {
+      if (!proactiveLastTestText) { testOut.textContent = '先点「试说一句」生成一句。'; return }
+      var text = proactiveLastTestText
+      close()
+      showProactiveBubble({ id: 'preview-' + Date.now(), text: text, ttlMs: Math.max(1000, Number(buf.bubble && buf.bubble.ttlSec || 10) * 1000) })
+    })
+    btns.appendChild(previewBtn)
+    var saveBtn = document.createElement('button')
+    saveBtn.type = 'button'
+    saveBtn.className = 'dshwv-bubbtn dshwv-bubbtn-ok'
+    saveBtn.textContent = '保存'
+    saveBtn.addEventListener('click', function () {
+      saveBtn.disabled = true
+      testOut.textContent = '保存中…'
+      fetch(PROACTIVE_URL, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: buf }),
+      }).then(function (r) { return r.json() }).then(function (d) {
+        if (!d || !d.ok) throw new Error((d && d.error) || '保存失败')
+        updateProactiveMenuState()
+        close()
+      }).catch(function (err) {
+        saveBtn.disabled = false
+        testOut.textContent = '保存失败：' + String((err && err.message) || err)
+      })
+    })
+    btns.appendChild(saveBtn)
+    card.appendChild(btns)
+    mask.appendChild(card)
+    mask.addEventListener('click', function (e) { if (e.target === mask) close() })
+    dshwBodyAppend(mask)
+  } catch (err) {}
+}
+setTimeout(function () { try { updateProactiveMenuState() } catch (err) {} }, 2500)
+
 function usageAlertBudgetEditor(key, onSave) {
   try {
     var isAlert = key === 'alert'
@@ -18778,7 +19212,7 @@ function sceneOpen(kind, renderFn, ttlMs) {
   //   队列泡泡（normal/random/custom）由 bubbleShowSeqNext() 在调用前按该项的框画好。
   // v851（第 4 条）：系统泡泡现在**各自也能选框**（usageSet.<kind>.frameId）——没选才跟随保底。
   try {
-    if (kind === 'cost' || kind === 'alert' || kind === 'wait') {
+    if (kind === 'cost' || kind === 'alert' || kind === 'wait' || kind === 'proactive') {
       var sysFid = sysFrameIdOf(kind)
       if (sysFid && frameById(sysFid)) {
         // 走渲染器同一套：内置框/找不到的 id 会自动回落（resolveFrameForStep 的三级回退）
@@ -18845,6 +19279,7 @@ function bubbleAutoClose() {
   bubbleTtlClear()
   if (bubbleScene && bubbleScene.kind === 'cost') { if (whaleSysSwapNext()) return; hideCostBubble(); return }
   if (bubbleScene && bubbleScene.kind === 'alert') { if (whaleSysSwapNext()) return; hideUsageAlertBubble(); return }
+  if (bubbleScene && bubbleScene.kind === 'proactive') { if (whaleSysSwapNext()) return; hideProactiveBubble(); return }
   // v761（#161 C5）：等待交互泡泡是**常驻**的（sceneOpen 收到 ttl 0 不布计时器），正常永远走不到这里；
   // 这一支是防御性的（例如用户先点开等待泡泡再改设置导致 ttl 被重新布上），语义仍与其他系统泡泡一致。
   if (bubbleScene && bubbleScene.kind === 'wait') { if (whaleSysSwapNext()) return; hideWaitBubble(); return }
@@ -20234,7 +20669,7 @@ function bubblePreviewInto(container, mods, widthPx, opts) {
 function whaleClick() {
   try {
     if (!bubbleOn) return
-    if (bubbleScene && (bubbleScene.kind === 'cost' || bubbleScene.kind === 'alert')) return // 消耗/预警提醒期间点鲸鱼不动作(点泡泡才关)
+    if (bubbleScene && (bubbleScene.kind === 'cost' || bubbleScene.kind === 'alert' || bubbleScene.kind === 'proactive')) return // 系统提醒期间点鲸鱼不动作(点泡泡才关)
     if (!bubbleShown) {
       bubbleRoundOn = true
       bubbleSeqIdx = 0
@@ -20272,6 +20707,7 @@ function bubbleNext() {
     if (!bubbleShown) return
     if (bubbleScene && bubbleScene.kind === 'cost') { hideCostBubble(); return }
     if (bubbleScene && bubbleScene.kind === 'alert') { hideUsageAlertBubble(); return }
+    if (bubbleScene && bubbleScene.kind === 'proactive') { hideProactiveBubble(); return }
     // v777：等待交互泡泡**可以点掉**（用户反馈「无法点击关闭」）。原来的实现在这里是 `return`
     //（设计意图是"别让误点把'正在等待你回答'收掉"），但真机上用户就是想把它点掉 ⇒ 改成：
     // 点泡泡 = 收起，并记住"这条挂起已被点掉"，pollWaitState 不再自动弹回（回答/批准或下一次新挂起照常）。
@@ -20360,6 +20796,12 @@ function whaleSysOpenItem(item) {
   } else if (item.kind === 'wait') {
     // 等待交互：常驻（ttl 0 = sceneOpen 不布自动关闭计时器），内容在渲染时按当前设置取
     sceneOpen('wait', function () { bubbleRenderWaitMods(item.waitKind) }, 0)
+  } else if (item.kind === 'proactive') {
+    // 白姐主动气泡：独立场景，排在每轮消耗（rank 3）之后、等待交互（rank 4）之前
+    var pTtl = (item && item.ttlMs != null) ? item.ttlMs : 10000
+    sceneOpen('proactive', function () {
+      bubbleRenderModules([{ type: 'text', text: String(item.text || ''), size: 7, bold: true }])
+    }, pTtl > 0 ? pTtl : 0)
   } else {
     sceneOpen('alert', function () { bubbleRenderModules(item.mods || []) }, (item && item.ttlMs != null) ? item.ttlMs : USAGE_ALERT_TTL)
   }
@@ -20413,7 +20855,7 @@ function whaleSysTick() {
     // 存在尚未入队的正展示系统泡?仅在鲸鱼空闲且无我们自己队列项时取下一个
     // v761（#161 C5）：waitShown 也必须算"正被占着"——等待泡泡是常驻的（whaleSysItem 会一直是它），
     // 正常走不到这里；但万一 item 被别的路径清掉而场景还停在等待内容上，也不能抢它的层。
-    if (costBubbleActive || waitShown || (bubbleScene && bubbleScene.kind === 'alert')) return
+    if (costBubbleActive || waitShown || (bubbleScene && (bubbleScene.kind === 'alert' || bubbleScene.kind === 'proactive'))) return
     var item = whaleSysQueue.shift()
     if (!item) return
     whaleSysOpenItem(item) // v772：展示逻辑抽成一份（tick / 淡切 / 抢占共用）
@@ -20438,6 +20880,19 @@ function whaleSysSwapNext() {
 }
 function hideUsageAlertBubble() {
   // 与手动点击“第 n 次点击”一致:有下一项时保持打开淡切,无下一项才收起
+  if (whaleSysSwapNext()) return
+  bubbleClearAll()
+  bubbleScene = null
+  bubbleShown = false
+  bubbleRandomActive = false
+  bubbleRandomLines = null
+  bubbleLiveMods = null
+  bubbleCloseVisual()
+  whaleSysDone()
+}
+// 白姐主动气泡：与预警/消耗同一条系统泡泡链路，只是独立场景。
+// 点击泡泡、到点自动关、被等待交互抢占时都走这里，保证队列里的下一项能继续。
+function hideProactiveBubble() {
   if (whaleSysSwapNext()) return
   bubbleClearAll()
   bubbleScene = null
@@ -23851,7 +24306,78 @@ function pollLastTurn() {
       .catch(function () {})
   } catch (err) {}
 }
-setInterval(function () { pollLastTurn(); pollWaitState() }, 1000)
+// —— 白姐主动气泡：轮询宿主生成的事件，排进系统泡泡队列（消耗之后、等待之前）——
+var PROACTIVE_EVENTS_URL = '/dsh-whale/proactive-events.json'
+var proactiveSeq = 0
+var proactiveAligned = false
+try {
+  var storedProactiveSeq = Number(localStorage.getItem('dshw-proactive-seq') || 0)
+  if (isFinite(storedProactiveSeq) && storedProactiveSeq > 0) { proactiveSeq = storedProactiveSeq; proactiveAligned = true }
+} catch (err) {}
+function proactiveClaim(id) {
+  try {
+    var key = 'dshw-proactive-shown-' + String(id)
+    if (localStorage.getItem(key)) return false
+    localStorage.setItem(key, '1')
+    return true
+  } catch (err) { return true }
+}
+function proactiveRelease(id) {
+  try { localStorage.removeItem('dshw-proactive-shown-' + String(id)) } catch (err) {}
+}
+function showProactiveBubble(ev) {
+  try {
+    if (!bubbleOn || !ev || !ev.text) return false
+    if (!proactiveClaim(ev.id)) return false
+    var ttl = Number(ev.ttlMs)
+    if (!isFinite(ttl) || ttl < 0) ttl = 10000
+    var ok = whaleSysPush({
+      kind: 'proactive',
+      rank: 3.5, // 1 预算 / 2 预警 / 3 消耗 / 3.5 主动气泡 / 4 等待交互
+      ttlMs: ttl,
+      text: String(ev.text),
+      emotion: String(ev.emotion || 'calm'),
+      frameId: '',
+      proactiveId: ev.id,
+    })
+    if (!ok) proactiveRelease(ev.id)
+    return ok
+  } catch (err) { return false }
+}
+function pollProactive() {
+  try {
+    fetch(PROACTIVE_EVENTS_URL + '?since=' + encodeURIComponent(String(proactiveSeq)), { cache: 'no-store' })
+      .then(function (r) { return r.json() })
+      .then(function (d) {
+        if (!d || !d.ok) return
+        if (d.reset) {
+          // 宿主重启后 seq 会归零；不要把历史事件当成新气泡重播，直接对齐到当前 seq。
+          proactiveSeq = Number(d.seq) || 0
+          proactiveAligned = true
+          try { localStorage.setItem('dshw-proactive-seq', String(proactiveSeq)) } catch (err) {}
+          return
+        }
+        if (!proactiveAligned) {
+          // 首次打开页面：对齐宿主当前 seq，不重播页面打开前已经生成过的气泡。
+          proactiveAligned = true
+          proactiveSeq = Number(d.seq) || 0
+          try { localStorage.setItem('dshw-proactive-seq', String(proactiveSeq)) } catch (err) {}
+          return
+        }
+        var list = Array.isArray(d.events) ? d.events : []
+        for (var i = 0; i < list.length; i++) {
+          var ev = list[i] || {}
+          var id = Number(ev.id) || 0
+          if (id <= proactiveSeq) continue
+          proactiveSeq = id
+          try { localStorage.setItem('dshw-proactive-seq', String(id)) } catch (err) {}
+          showProactiveBubble(ev)
+        }
+      })
+      .catch(function () {})
+  } catch (err) {}
+}
+setInterval(function () { pollLastTurn(); pollWaitState(); pollProactive() }, 1000)
 }
 // 主界面检测通过（或稍后由 MutationObserver 检测到）后执行挂件初始化；非主界面不启动
 try { dshwTryStart(true) } catch (err) {}
