@@ -20007,7 +20007,7 @@ function bubbleCloseVisual() {
 // 清掉 textBox 里遗留的模块行(自定义场景切走/关闭时,防止叠到默认/消耗内容上)
 function bubbleClearModuleRows() {
   try {
-    var els = textBox.querySelectorAll('.dshwv-trow, .dshwv-mimg, [data-dshw-interactive]')
+    var els = textBox.querySelectorAll('.dshwv-trow, .dshwv-mimg, [data-dshw-interactive], [data-dshw-interactive-wrap]')
     for (var i = 0; i < els.length; i++) { try { textBox.removeChild(els[i]) } catch (err) {} }
   } catch (err) {}
 }
@@ -21067,7 +21067,7 @@ function bubbleRowContentOf(mod) {
 // 把模块追加为行到指定父容器(真实泡泡 textBox 与编辑器预览共用;旧配置每模块一行 → 与旧版逐像素一致)
 function bubbleRowsTo(parentEl, mods) {
   if (!parentEl || !Array.isArray(mods)) return
-  var old = parentEl.querySelectorAll('.dshwv-trow, .dshwv-mimg')
+  var old = parentEl.querySelectorAll('.dshwv-trow, .dshwv-mimg, [data-dshw-interactive], [data-dshw-interactive-wrap]')
   for (var i = 0; i < old.length; i++) { try { parentEl.removeChild(old[i]) } catch (err) {} }
   var ROW_MAX = 6 // 泡泡行数上限(维持旧版)
   var MOD_MAX = 6 // 每行模块数上限(F2)
@@ -21361,7 +21361,12 @@ function bubbleRenderModules(mods) {
     // 该标记不可能残留成"其实没显示却以为在显示"。
     waitShown = !!(bubbleScene && bubbleScene.kind === 'wait')
     bubbleLiveMods = Array.isArray(mods) ? mods.slice() : null
-    try { textBox.style.zIndex = (bubbleScene && bubbleScene.kind === 'interactive') ? '6' : '' } catch (err) {}
+    try {
+      var isInteractive = !!(bubbleScene && bubbleScene.kind === 'interactive')
+      textBox.style.zIndex = isInteractive ? '6' : ''
+      textBox.style.boxSizing = ''
+      textBox.style.paddingBottom = ''
+    } catch (err) {}
     // 互动气泡的按钮行不是模块行，bubbleClearModuleRows 不认识它 ⇒ 这里手动清掉，
     // 否则“想看/不想看”会残留在下一句回复下面（真机第一次试就踩到了）。
     try {
@@ -21793,6 +21798,40 @@ function renderInteractiveScene(script) {
   var ttl = Number(script && script.ttlMs) || 60000
   sceneOpen('interactive', function () { bubbleRenderInteractive(script) }, ttl)
 }
+// 互动泡的提示/回复可能很长。普通泡泡行是 nowrap，长句会直接戳出框；
+// 这里只对互动泡的行允许换行，并在换行后仍放不下时逐级缩小字号。
+function fitInteractiveText(isRetry) {
+  try {
+    var rows = textBox.querySelectorAll('.dshwv-trow')
+    if (!rows.length) return
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i]
+      row.style.whiteSpace = 'normal'
+      row.style.wordBreak = 'break-word'
+      row.style.overflowWrap = 'anywhere'
+      row.style.maxWidth = '100%'
+      row.style.lineHeight = '1.12'
+    }
+    var maxW = Math.max(0, (textBox.clientWidth || 0) - 8)
+    var actions = textBox.querySelector('[data-dshw-interactive]')
+    var actionH = actions ? (actions.offsetHeight || 28) + 10 : 0
+    var maxH = Math.max(0, Math.floor((textBox.clientHeight || 0) - actionH - 4))
+    if (!maxW || !maxH) return
+    // 长句直接从小一级开始试，避免先按 7 号排一遍再缩、视觉上“先溢出后跳小”。
+    var chars = 0
+    for (var c = 0; c < rows.length; c++) chars += String(rows[c].textContent || '').length
+    var startLevel = chars > 40 ? 2 : (chars > 24 ? 4 : 7)
+    for (var level = startLevel; level >= 1; level--) {
+      var u = bubbleModuleFontU(level)
+      for (var j = 0; j < rows.length; j++) rows[j].style.setProperty('font-size', 'calc(var(--dshw-u) * ' + u + ')', 'important')
+      if (textBox.scrollWidth <= maxW + 2 && textBox.scrollHeight <= maxH + 2) break
+    }
+    // 场景切换/按钮挂载可能在同一拍里再次写回字号；下一拍用新节点重量一次，只重试一次。
+    if (!isRetry) {
+      try { setTimeout(function () { try { fitInteractiveText(true) } catch (err) {} }, 60) } catch (err) {}
+    }
+  } catch (err) {}
+}
 function bubbleRenderInteractive(script) {
   try {
     var s = script || {}
@@ -21800,7 +21839,17 @@ function bubbleRenderInteractive(script) {
     // 文字层默认 z-index:auto，个别皮肤/框的 SVG 会压到它上面；互动泡显式抬一层，
     // 保证提示和按钮一定在框上面（按钮自己还有 pointer-events:auto）。
     try { textBox.style.zIndex = '6' } catch (err) {}
-    appendInteractiveActions(s)
+    // 用一层纵向 wrapper 固定顺序：文字行在前、按钮行在后。
+    // 不用绝对定位，避免按钮跑到文字上方或被框边裁掉。
+    var wrap = document.createElement('div')
+    wrap.setAttribute('data-dshw-interactive-wrap', '1')
+    wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;min-height:0'
+    var rows = textBox.querySelectorAll('.dshwv-trow')
+    for (var wi = 0; wi < rows.length; wi++) { try { wrap.appendChild(rows[wi]) } catch (err) {} }
+    // 按钮直接建在 wrapper 里，且一定在文字行之后。
+    appendInteractiveActions(s, wrap)
+    try { textBox.appendChild(wrap) } catch (err) {}
+    fitInteractiveText()
   } catch (err) {}
 }
 function interactiveButton(label, onClick) {
@@ -21816,11 +21865,11 @@ function interactiveButton(label, onClick) {
   })
   return b
 }
-function appendInteractiveActions(script) {
+function appendInteractiveActions(script, parent) {
   try {
     var box = document.createElement('div')
     box.setAttribute('data-dshw-interactive', '1')
-    box.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;margin-top:7px;pointer-events:auto;position:relative;z-index:5'
+    box.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;justify-content:center;pointer-events:auto;position:relative;margin-top:7px;z-index:5'
     var opts = Array.isArray(script && script.options) ? script.options.slice(0, 2) : []
     for (var i = 0; i < opts.length; i++) {
       (function (opt, idx) {
@@ -21828,14 +21877,17 @@ function appendInteractiveActions(script) {
         box.appendChild(interactiveButton(opt.label, function () { chooseInteractive(opt, idx) }))
       })(opts[i], i)
     }
-    textBox.appendChild(box)
-  } catch (err) {}
+    ;(parent || textBox).appendChild(box)
+    return box
+  } catch (err) { return null }
 }
 function chooseInteractive(opt, idx) {
   try {
     if (interactiveState) interactiveState.answered = true
     var reply = String((opt && opt.reply) || '')
     bubbleRenderModules([{ type: 'text', text: reply, size: 7, bold: true }])
+    try { textBox.style.boxSizing = ''; textBox.style.paddingBottom = '' } catch (err) {}
+    fitInteractiveText()
     // 选完之后就是普通泡泡：10 秒后自动收，点泡泡也能收；不再放第三个按钮。
     try { if (bubbleScene) bubbleScene.ttlMs = 10000; bubbleResetTtl() } catch (err) {}
     var evId = interactiveState && interactiveState.eventId
@@ -21855,6 +21907,8 @@ function hideInteractiveBubble() {
   // 超时/点掉时把选项行一起清掉；否则按钮节点会留在已收起的泡泡里，
   // 下一次场景切换前被 querySelector 误判成“还在显示”。
   try { bubbleClearModuleRows() } catch (err) {}
+  try { textBox.style.boxSizing = ''; textBox.style.paddingBottom = '' } catch (err) {}
+  try { var iw = textBox.querySelector('[data-dshw-interactive-wrap]'); if (iw) textBox.removeChild(iw) } catch (err) {}
   if (whaleSysSwapNext()) return
   bubbleClearAll()
   interactiveState = null
