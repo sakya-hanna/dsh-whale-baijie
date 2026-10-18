@@ -189,6 +189,26 @@ test('service strips 欸嘿嘿 when the previous bubble already used it', async 
   fs.rmSync(service._dir, { recursive: true, force: true })
 })
 
+test('mid-sentence laughter and a fresh leading laugh are both allowed', async () => {
+  let n = 0
+  const replies = [
+    '{"speak":true,"text":"今天也忙完了呢，欸嘿嘿"}',
+    '{"speak":true,"text":"欸嘿嘿，那就歇会儿吧"}',
+  ]
+  const ctx = fakeCtx(() => replies[Math.min(n++, replies.length - 1)])
+  const service = makeService({ ctx })
+  service.updateConfig({ enabled: true, probability: 1, minIntervalSec: 0, maxPerHour: 0, maxPerDay: 0, minTurnChars: 0 })
+  pushTurn(service)
+  await new Promise((r) => setTimeout(r, 10))
+  pushTurn(service)
+  await new Promise((r) => setTimeout(r, 10))
+  const texts = service._state.events.map((e) => e.text)
+  assert.equal(texts.length, 2)
+  assert.match(texts[0], /欸嘿嘿/)
+  assert.match(texts[1], /^欸嘿嘿/)
+  fs.rmSync(service._dir, { recursive: true, force: true })
+})
+
 test('service generates one event for a completed human turn', async () => {
   const service = makeService()
   service.updateConfig({ enabled: true, probability: 1, minIntervalSec: 0, maxPerHour: 0, maxPerDay: 0, minTurnChars: 0 })
