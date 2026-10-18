@@ -24315,11 +24315,11 @@ function pollLastTurn() {
 }
 // —— 白姐主动气泡：轮询宿主生成的事件，排进系统泡泡队列（消耗之后、等待之前）——
 var PROACTIVE_EVENTS_URL = '/dsh-whale/proactive-events.json'
+var PROACTIVE_STALE_MS = 15 * 60 * 1000
 var proactiveSeq = 0
-var proactiveAligned = false
 try {
   var storedProactiveSeq = Number(localStorage.getItem('dshw-proactive-seq') || 0)
-  if (isFinite(storedProactiveSeq) && storedProactiveSeq > 0) { proactiveSeq = storedProactiveSeq; proactiveAligned = true }
+  if (isFinite(storedProactiveSeq) && storedProactiveSeq > 0) proactiveSeq = storedProactiveSeq
 } catch (err) {}
 function proactiveClaim(id) {
   try {
@@ -24359,18 +24359,10 @@ function pollProactive() {
       .then(function (d) {
         if (!d || !d.ok) return
         if (d.reset) {
-          // 宿主重启后 seq 会归零；不要把历史事件当成新气泡重播，直接对齐到当前 seq。
-          proactiveSeq = Number(d.seq) || 0
-          proactiveAligned = true
-          try { localStorage.setItem('dshw-proactive-seq', String(proactiveSeq)) } catch (err) {}
-          return
-        }
-        if (!proactiveAligned) {
-          // 首次打开页面：对齐宿主当前 seq，不重播页面打开前已经生成过的气泡。
-          proactiveAligned = true
-          proactiveSeq = Number(d.seq) || 0
-          try { localStorage.setItem('dshw-proactive-seq', String(proactiveSeq)) } catch (err) {}
-          return
+          // 宿主重启后 seq 会归零：从 0 重新对齐，但只补发“最近 15 分钟”的事件，
+          // 不把上一次运行留下来的旧气泡全重播一遍。
+          proactiveSeq = 0
+          try { localStorage.setItem('dshw-proactive-seq', '0') } catch (err) {}
         }
         var list = Array.isArray(d.events) ? d.events : []
         for (var i = 0; i < list.length; i++) {
@@ -24379,6 +24371,10 @@ function pollProactive() {
           if (id <= proactiveSeq) continue
           proactiveSeq = id
           try { localStorage.setItem('dshw-proactive-seq', String(id)) } catch (err) {}
+          // 页面刚打开/刚重启时，宿主可能已经先生成了气泡；15 分钟内的补发一次，
+          // 更早的（比如关着页面时生成的）不追着弹。
+          var evTs = Number(ev.ts) || 0
+          if (evTs && Date.now() - evTs > PROACTIVE_STALE_MS) continue
           showProactiveBubble(ev)
         }
       })

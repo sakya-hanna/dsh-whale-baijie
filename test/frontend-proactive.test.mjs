@@ -128,3 +128,47 @@ test('bubbleAutoClose routes proactive to hideProactiveBubble', () => {
   h.close()
   assert.equal(h.hidden, 1)
 })
+
+function makePollHarness(payload) {
+  const code = [
+    'var PROACTIVE_EVENTS_URL = "/dsh-whale/proactive-events.json"',
+    'var PROACTIVE_STALE_MS = 15 * 60 * 1000',
+    'var proactiveSeq = 0',
+    'var __shown = []',
+    'var __seqSaved = 0',
+    'var localStorage = { getItem: function(){ return null }, setItem: function(k,v){ if (k === "dshw-proactive-seq") __seqSaved = Number(v) }, removeItem: function(){} }',
+    'function showProactiveBubble(ev) { __shown.push(ev.id) }',
+    'var __payload = ' + JSON.stringify(payload),
+    'function fetch() { return Promise.resolve({ json: function(){ return Promise.resolve(__payload) } }) }',
+    extract('pollProactive'),
+    'return { poll: pollProactive, get shown(){ return __shown }, get seq(){ return proactiveSeq }, get saved(){ return __seqSaved } }',
+  ].join('\n')
+  return new Function(code)()
+}
+
+const tick = () => new Promise((r) => setTimeout(r, 5))
+
+test('first poll shows a recent event generated just before page load', async () => {
+  const h = makePollHarness({ ok: true, seq: 2, reset: false, events: [{ id: 2, ts: Date.now() - 60000, text: '刚好赶上' }] })
+  h.poll()
+  await tick()
+  assert.deepEqual(h.shown, [2])
+  assert.equal(h.seq, 2)
+  assert.equal(h.saved, 2)
+})
+
+test('first poll skips events older than the 15-minute window', async () => {
+  const h = makePollHarness({ ok: true, seq: 2, reset: false, events: [{ id: 2, ts: Date.now() - 16 * 60 * 1000, text: '旧事件' }] })
+  h.poll()
+  await tick()
+  assert.deepEqual(h.shown, [])
+  assert.equal(h.seq, 2)
+})
+
+test('host seq reset replays only recent events', async () => {
+  const h = makePollHarness({ ok: true, seq: 1, reset: true, events: [{ id: 1, ts: Date.now() - 30000, text: '重启后' }] })
+  h.poll()
+  await tick()
+  assert.deepEqual(h.shown, [1])
+  assert.equal(h.seq, 1)
+})
