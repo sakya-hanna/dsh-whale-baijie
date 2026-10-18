@@ -2122,6 +2122,22 @@ proactiveBtn.textContent = '设置'
 proactiveBtn.title = '打开「白姐主动说话」设置：概率、模式、频率、模型、上下文、提示词、语音预留'
 proactiveBtn.addEventListener('click', function (e) { e.stopPropagation(); openProactivePanel() })
 rowProactive.appendChild(proactiveBtn)
+// —— 草帽玩具入口：总开关摘要 + 设置（面板见 openHatPanel）——
+var rowHat = menuRow()
+rowHat.appendChild(menuLabel('草帽玩具'))
+var hatStateEl = document.createElement('span')
+hatStateEl.className = 'dshwv-volpct'
+hatStateEl.textContent = '已开启'
+hatStateEl.title = '长按白姐摘帽；拖拽、甩抛、悬停戴回'
+rowHat.appendChild(hatStateEl)
+var hatBtn = document.createElement('button')
+hatBtn.type = 'button'
+hatBtn.className = 'dshwv-roleimport'
+hatBtn.style.flex = '1'
+hatBtn.textContent = '设置'
+hatBtn.title = '选择无帽版角色 / 草帽图片，调整长按时间、戴回时间与落位'
+hatBtn.addEventListener('click', function (e) { e.stopPropagation(); openHatPanel() })
+rowHat.appendChild(hatBtn)
 var row6 = menuRow()
 row6.appendChild(menuLabel('气泡全局开关'))
 row6.appendChild(bubbleToggle)
@@ -2185,6 +2201,7 @@ menuBox.appendChild(rowRole)
 menuBox.appendChild(row1)
 menuBox.appendChild(row2)
 menuBox.appendChild(rowProactive)
+menuBox.appendChild(rowHat)
 menuBox.appendChild(row6)
 // v762：「每轮消耗提示」整行**不再挂到主菜单**（菜单里已再无此行，配置入口移进「全局设置」面板）。
 // ⚠️ row7 及其内部控件（turnCostToggle / turnCostCustomBtn）的创建**必须原样保留**：
@@ -4594,6 +4611,249 @@ function buildProactivePanel(cfg, defaults, stats, recent) {
   } catch (err) {}
 }
 setTimeout(function () { try { updateProactiveMenuState() } catch (err) {} }, 2500)
+setTimeout(function () { try { updateHatMenuState() } catch (err) {} }, 2600)
+
+// ===== 草帽玩具设置面板 =====
+// 素材从角色库 / 泡泡图库选；长按时间、戴回时间、落位写进 localStorage 的 dshw-hat-cfg。
+// 保存后刷新页面生效（正在玩的草帽状态不做原地热替换，避免出现两顶帽子）。
+function updateHatMenuState() {
+  try {
+    if (typeof hatStateEl === 'undefined' || !hatStateEl) return
+    var c = dshwHatCfg()
+    hatStateEl.textContent = c.enabled === false ? '已关闭' : '已开启'
+    hatStateEl.title = c.enabled === false ? '草帽玩具已关闭' : '长按白姐摘帽；拖拽、甩抛、悬停戴回'
+  } catch (err) {}
+}
+function openHatPanel() {
+  Promise.all([
+    fetch('/dsh-whale/roles.json', { cache: 'no-store' }).then(function (r) { return r.json() }),
+    fetch('/dsh-whale/bubble-imgs.json', { cache: 'no-store' }).then(function (r) { return r.json() }),
+  ]).then(function (arr) {
+    var roles = (arr[0] && arr[0].ok && Array.isArray(arr[0].roles)) ? arr[0].roles : []
+    var imgs = (arr[1] && arr[1].ok && Array.isArray(arr[1].images)) ? arr[1].images : []
+    buildHatPanel(roles, imgs)
+  }).catch(function (err) { buildHatError(err) })
+}
+function buildHatError(err) {
+  try {
+    var mask = document.createElement('div')
+    mask.className = 'dshwv-bubmask'
+    mask.style.zIndex = '30000'
+    var card = document.createElement('div')
+    card.className = 'dshwv-bubcard'
+    card.style.width = 'min(420px,calc(100vw - 16px))'
+    var title = document.createElement('div')
+    title.className = 'dshwv-bubtitle'
+    title.textContent = '草帽玩具'
+    card.appendChild(title)
+    var p = document.createElement('div')
+    p.className = 'dshwv-hint'
+    p.style.padding = '8px 6px'
+    p.textContent = '读取角色/图片清单失败：' + String((err && err.message) || err)
+    card.appendChild(p)
+    var btns = document.createElement('div')
+    btns.className = 'dshwv-bubbtns'
+    var close = document.createElement('button')
+    close.type = 'button'
+    close.className = 'dshwv-bubbtn dshwv-bubbtn-no'
+    close.textContent = '关闭'
+    close.addEventListener('click', function () { dshwBodyDetach(mask) })
+    btns.appendChild(close)
+    card.appendChild(btns)
+    mask.appendChild(card)
+    mask.addEventListener('click', function (e) { if (e.target === mask) dshwBodyDetach(mask) })
+    dshwBodyAppend(mask)
+  } catch (e2) {}
+}
+function buildHatPanel(roles, imgs) {
+  try {
+    var cfg = dshwHatCfg()
+    var explicitRole = dshwHatLs('dshw-hat-role', '')
+    var explicitImg = dshwHatLs('dshw-hat-img', '')
+    var pick = dshwHatPickConfig(roles, imgs, explicitRole, explicitImg)
+    var mask = document.createElement('div')
+    mask.className = 'dshwv-bubmask'
+    mask.style.zIndex = '30000'
+    var card = document.createElement('div')
+    card.className = 'dshwv-bubcard'
+    card.style.width = 'min(450px,calc(100vw - 16px))'
+    card.style.maxHeight = '88vh'
+    card.style.overflow = 'hidden auto'
+    var title = document.createElement('div')
+    title.className = 'dshwv-bubtitle'
+    title.textContent = '草帽玩具'
+    card.appendChild(title)
+    var status = document.createElement('div')
+    status.className = 'dshwv-hint'
+    status.style.cssText = 'padding:2px 6px 6px;font-size:11px;line-height:1.5'
+    status.textContent = (pick.role && pick.img)
+      ? ('当前素材：无帽版=' + pick.role.name + '（' + pick.role.id + '） · 草帽=' + pick.img.name + '（' + pick.img.id + '）')
+      : ('当前未启动：' + (pick.why.length ? pick.why.join('；') : '缺少素材'))
+    card.appendChild(status)
+    var body = document.createElement('div')
+    card.appendChild(body)
+    var saveMsg = document.createElement('div')
+    saveMsg.className = 'dshwv-hint'
+    saveMsg.style.cssText = 'padding:4px 6px;font-size:11px;min-height:16px'
+    card.appendChild(saveMsg)
+
+    function section(text) {
+      var el = document.createElement('div')
+      el.className = 'dshwv-bubsec'
+      el.textContent = text
+      el.style.marginTop = '10px'
+      body.appendChild(el)
+    }
+    function row(labelText, node, hint) {
+      var r = document.createElement('div')
+      r.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 6px;font-size:12px;line-height:1.4'
+      var lab = document.createElement('span')
+      lab.textContent = labelText
+      lab.style.cssText = 'flex:0 0 auto;min-width:72px'
+      r.appendChild(lab)
+      if (node) {
+        node.style.flex = '1 1 auto'
+        node.style.minWidth = '0'
+        r.appendChild(node)
+      }
+      if (hint) {
+        var h = document.createElement('span')
+        h.className = 'dshwv-hint'
+        h.textContent = hint
+        h.style.cssText = 'font-size:10px;opacity:.75;flex:0 1 auto'
+        r.appendChild(h)
+      }
+      body.appendChild(r)
+      return r
+    }
+    function check(labelText, checked) {
+      var wrap = document.createElement('label')
+      wrap.style.cssText = 'display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px'
+      var inp = document.createElement('input')
+      inp.type = 'checkbox'
+      inp.className = 'dshwv-check'
+      inp.checked = !!checked
+      wrap.appendChild(inp)
+      var sp = document.createElement('span')
+      sp.textContent = labelText
+      wrap.appendChild(sp)
+      row('', wrap)
+      return inp
+    }
+    function num(labelText, value, min, max, step, hint) {
+      var inp = document.createElement('input')
+      inp.type = 'number'
+      inp.className = 'dshwv-number'
+      inp.min = String(min)
+      inp.max = String(max)
+      inp.step = String(step)
+      inp.value = String(value)
+      inp.style.maxWidth = '104px'
+      row(labelText, inp, hint)
+      return inp
+    }
+    function select(labelText, list, current, autoText) {
+      var sel = document.createElement('select')
+      sel.className = 'dshwv-sound'
+      sel.style.maxWidth = '100%'
+      var auto = document.createElement('option')
+      auto.value = ''
+      auto.textContent = autoText
+      if (!current) auto.selected = true
+      sel.appendChild(auto)
+      for (var i = 0; i < list.length; i++) {
+        var it = list[i] || {}
+        if (!it.id || it.id === 'default') continue
+        var o = document.createElement('option')
+        o.value = it.id
+        o.textContent = (it.name || it.id) + '（' + it.id + '）'
+        if (current === it.id) o.selected = true
+        sel.appendChild(o)
+      }
+      row(labelText, sel)
+      return sel
+    }
+
+    section('素材')
+    var enabledChk = check('启用草帽玩具', cfg.enabled !== false)
+    var roleSel = select('无帽版角色', roles, explicitRole, '自动识别（名字带「无帽」/「摘帽」）')
+    var imgSel = select('草帽图片', imgs, explicitImg, '自动识别（名字带「草帽」/「帽」/hat）')
+    var autoChk = check('默认角色时自动恢复白姐', cfg.autoRole !== false)
+
+    section('手感')
+    var holdInput = num('长按摘帽', Number(cfg.holdMs) || 800, 300, 3000, 50, '毫秒')
+    var returnInput = num('悬停戴回', Number(cfg.returnMs) || 3000, 500, 10000, 100, '毫秒')
+
+    section('落位')
+    var ax = num('X（左右）', Number(cfg.anchor && cfg.anchor.x) || 0.4296, 0, 1.5, 0.0001, '相对她的宽度')
+    var ay = num('Y（上下）', Number(cfg.anchor && cfg.anchor.y) || 0.3267, 0, 1.5, 0.0001, '相对她的高度')
+    var aw = num('W（宽度）', Number(cfg.anchor && cfg.anchor.w) || 0.7385, 0.05, 2, 0.0001, '相对她的宽度')
+    var anchorNote = document.createElement('div')
+    anchorNote.className = 'dshwv-hint'
+    anchorNote.style.cssText = 'padding:2px 6px 8px;font-size:10px;line-height:1.5;opacity:.8'
+    anchorNote.textContent = '换了素材后落位通常要重新定标；不确定就保持默认，先只换角色/图片。'
+    body.appendChild(anchorNote)
+
+    var btns = document.createElement('div')
+    btns.className = 'dshwv-bubbtns'
+    var cancelBtn = document.createElement('button')
+    cancelBtn.type = 'button'
+    cancelBtn.className = 'dshwv-bubbtn dshwv-bubbtn-no'
+    cancelBtn.textContent = '取消'
+    cancelBtn.addEventListener('click', function () { dshwBodyDetach(mask) })
+    btns.appendChild(cancelBtn)
+    var resetBtn = document.createElement('button')
+    resetBtn.type = 'button'
+    resetBtn.className = 'dshwv-bubbtn dshwv-bubbtn-no'
+    resetBtn.textContent = '恢复默认'
+    resetBtn.addEventListener('click', function () {
+      enabledChk.checked = true
+      autoChk.checked = true
+      roleSel.value = ''
+      imgSel.value = ''
+      holdInput.value = String(DSHW_HAT_DEF.holdMs)
+      returnInput.value = String(DSHW_HAT_DEF.returnMs)
+      ax.value = String(DSHW_HAT_DEF.anchor.x)
+      ay.value = String(DSHW_HAT_DEF.anchor.y)
+      aw.value = String(DSHW_HAT_DEF.anchor.w)
+      saveMsg.textContent = '已恢复默认值（还没保存）。'
+    })
+    btns.appendChild(resetBtn)
+    var saveBtn = document.createElement('button')
+    saveBtn.type = 'button'
+    saveBtn.className = 'dshwv-bubbtn dshwv-bubbtn-ok'
+    saveBtn.textContent = '保存'
+    saveBtn.addEventListener('click', function () {
+      try {
+        if (roleSel.value) localStorage.setItem('dshw-hat-role', roleSel.value)
+        else localStorage.removeItem('dshw-hat-role')
+        if (imgSel.value) localStorage.setItem('dshw-hat-img', imgSel.value)
+        else localStorage.removeItem('dshw-hat-img')
+        var next = {
+          enabled: !!enabledChk.checked,
+          autoRole: !!autoChk.checked,
+          holdMs: Math.max(300, Math.min(3000, Number(holdInput.value) || DSHW_HAT_DEF.holdMs)),
+          returnMs: Math.max(500, Math.min(10000, Number(returnInput.value) || DSHW_HAT_DEF.returnMs)),
+          anchor: {
+            x: Math.max(0, Math.min(1.5, Number(ax.value) || DSHW_HAT_DEF.anchor.x)),
+            y: Math.max(0, Math.min(1.5, Number(ay.value) || DSHW_HAT_DEF.anchor.y)),
+            w: Math.max(0.05, Math.min(2, Number(aw.value) || DSHW_HAT_DEF.anchor.w)),
+          },
+        }
+        localStorage.setItem('dshw-hat-cfg', JSON.stringify(next))
+        updateHatMenuState()
+        saveMsg.textContent = '已保存，刷新页面后生效。'
+      } catch (err) {
+        saveMsg.textContent = '保存失败：' + String((err && err.message) || err)
+      }
+    })
+    btns.appendChild(saveBtn)
+    card.appendChild(btns)
+    mask.appendChild(card)
+    mask.addEventListener('click', function (e) { if (e.target === mask) dshwBodyDetach(mask) })
+    dshwBodyAppend(mask)
+  } catch (err) {}
+}
 
 function usageAlertBudgetEditor(key, onSave) {
   try {
@@ -15089,6 +15349,7 @@ var bubbleTapAdvance = false
 // 长按白姐 → 拿起草帽；草帽能拖能扔；撞到她弹开；按住悬停 3 秒 → 她戴回去。
 // 素材走现成的两条路（角色 / 泡泡图），所以本玩具不改路由、不改宿主。
 var DSHW_HAT_DEF = {
+  enabled: true,      // 总开关（设置页可关；关掉后不挂草帽、不监听长按）
   holdMs: 800,        // 长按多久算"拿起"（900 对普通手感偏长，调到 800）
   returnMs: 3000,     // 悬停多久自动戴回（弟弟指定 3 秒）
   moveTol: 35,        // 判定"手没动"的容差（px）：22 太紧（真机日志里连续三次 22~25px 被取消）
@@ -15118,6 +15379,17 @@ var DSHW_HAT_DEF = {
 function dshwHatCfg() {
   var c = {}
   for (var k in DSHW_HAT_DEF) c[k] = DSHW_HAT_DEF[k]
+  // 设置页保存的持久配置（localStorage: dshw-hat-cfg）优先于出厂默认；
+  // 控制台 window.__dshwHatCfg 仍然最高，方便临时调试。
+  try {
+    var raw = dshwHatLs('dshw-hat-cfg', '')
+    if (raw) {
+      var saved = JSON.parse(raw)
+      if (saved && typeof saved === 'object') {
+        for (var k1 in saved) if (saved[k1] !== undefined) c[k1] = saved[k1]
+      }
+    }
+  } catch (err) {}
   try {
     if (window.__dshwHatCfg && typeof window.__dshwHatCfg === 'object') {
       for (var k2 in window.__dshwHatCfg) if (window.__dshwHatCfg[k2] !== undefined) c[k2] = window.__dshwHatCfg[k2]
@@ -15125,7 +15397,11 @@ function dshwHatCfg() {
   } catch (err) {}
   if (c.anchor && typeof c.anchor === 'object') {
     var dA = DSHW_HAT_DEF.anchor
-    c.anchor = { x: Number(c.anchor.x) || dA.x, y: Number(c.anchor.y) || dA.y, w: Number(c.anchor.w) || dA.w }
+    c.anchor = {
+      x: isFinite(Number(c.anchor.x)) ? Number(c.anchor.x) : dA.x,
+      y: isFinite(Number(c.anchor.y)) ? Number(c.anchor.y) : dA.y,
+      w: isFinite(Number(c.anchor.w)) ? Number(c.anchor.w) : dA.w,
+    }
   }
   return c
 }
@@ -16016,6 +16292,15 @@ function dshwHatReconcile() {
 function dshwHatBootstrap() {
   try {
     if (dshwHatState.ready) return
+    var bootCfg = dshwHatCfg()
+    if (bootCfg.enabled === false) {
+      dshwHatState.why = '草帽玩具已在设置里关闭'
+      if (!dshwHatState.warned) {
+        dshwHatState.warned = true
+        try { console.log('[草帽玩具] 已关闭（设置 → 草帽玩具）') } catch (err) {}
+      }
+      return
+    }
     var roles = (typeof roleList !== 'undefined' && Array.isArray(roleList) && roleList.length) ? roleList : null
     var imgs = (typeof bubbleImgList !== 'undefined' && Array.isArray(bubbleImgList) && bubbleImgList.length) ? bubbleImgList : null
     if (!roles) {

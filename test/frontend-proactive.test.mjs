@@ -172,3 +172,23 @@ test('host seq reset replays only recent events', async () => {
   assert.deepEqual(h.shown, [1])
   assert.equal(h.seq, 1)
 })
+
+test('hat config merges saved localStorage values over defaults', () => {
+  const saved = { holdMs: 1200, anchor: { x: 0.5 } }
+  const code = [
+    'var DSHW_HAT_DEF = { enabled: true, holdMs: 800, returnMs: 3000, anchor: { x: 0.4, y: 0.3, w: 0.7 } }',
+    'var __store = { "dshw-hat-cfg": ' + JSON.stringify(JSON.stringify(saved)) + ' }',
+    'var localStorage = { getItem: function(k){ return Object.prototype.hasOwnProperty.call(__store,k) ? __store[k] : null }, setItem: function(k,v){ __store[k] = String(v) }, removeItem: function(k){ delete __store[k] } }',
+    'var window = {}',
+    extract('dshwHatLs'),
+    extract('dshwHatCfg'),
+    'return { cfg: dshwHatCfg }',
+  ].join('\n')
+  const h = new Function(code)()
+  const c = h.cfg()
+  assert.equal(c.holdMs, 1200)
+  assert.equal(c.returnMs, 3000)
+  assert.equal(c.anchor.x, 0.5)
+  assert.equal(c.anchor.y, 0.3)
+  assert.equal(c.anchor.w, 0.7)
+})
