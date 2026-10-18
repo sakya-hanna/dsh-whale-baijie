@@ -1,0 +1,11 @@
+{
+  "_note": "Extracted from ~/.dsh/dream-skin.json. Upload the referenced image in dsh-dream-skin, then apply these settings manually.",
+  "kind": "image",
+  "image": "wallpapers/kohaku-shiro-bai-xia-day.jpg",
+  "skin": "dream-pack:kohaku-shiro-bai-xia-day",
+  "followsSkin": false,
+  "opacity": "0.34",
+  "blur": "0",
+  "fit": "cover",
+  "autoDim": "0"
+}

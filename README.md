@@ -53,6 +53,10 @@
 
 保存写入 `localStorage` 的 `dshw-hat-cfg`（素材 id 走 `dshw-hat-role` / `dshw-hat-img`），**刷新页面后生效**。素材图片本身仍在 `$DSH_HOME/whale-roles` 与 `$DSH_HOME/whale-bubble-imgs`，不在插件包里；换机器时要一起导入。
 
+## 主题包 / 壁纸导入
+
+之前用过的 dsh-dream-skin 主题包、壁纸参数，以及 Codex-Dream-Skin 的预设，整理在 [`theme-packs/`](./theme-packs/)：里面有可直接导入的 `.dsh-theme.json`、壁纸图片和导入说明。
+
 ## 白姐气泡 · 互动
 
 主菜单 →「白姐气泡 · 互动」：
