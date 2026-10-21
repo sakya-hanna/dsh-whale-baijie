@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
 if (window.__dshWhaleWidget) return
 window.__dshWhaleWidget = true
 
@@ -574,6 +574,11 @@ var css = [
   // 代价是 img 的**矩形**（含透明边距）会吞掉点击 → 由 setupHitTest() 用命中图的**凸包**做 clip-path
   // 裁掉透明区（凸包包含全部不透明像素，不会裁到角色本身），"点到透明处穿透到下层"的行为得以保留。
   '.dshwv-img{position:absolute;right:0;bottom:0;width:59.45%;height:59.45%;display:block;pointer-events:auto;-webkit-user-drag:none;user-select:none;object-fit:contain;object-position:right bottom}',
+  // 音乐伴舞：走路时的「果冻步」。只作用在角色 img 上——点击 Q 弹用的是 .dshwv-body，
+  // 根节点的左右镜像用的是 .dshwv-root 的 scaleX(-1)，三者互不覆盖。
+  '@keyframes dshwv-walk-bob{0%{transform:translateY(0) scale(1,1)}18%{transform:translateY(-3%) scale(.96,1.05)}38%{transform:translateY(0) scale(1.04,.95)}58%{transform:translateY(-1.2%) scale(1,1.02)}78%{transform:translateY(0) scale(1,1)}100%{transform:translateY(0) scale(1,1)}}',
+  '.dshwv-root.dshwv-dancing .dshwv-img{animation:dshwv-walk-bob .72s ease-in-out infinite;transform-origin:50% 100%}',
+  '@media (prefers-reduced-motion: reduce){.dshwv-root.dshwv-dancing .dshwv-img{animation:none}}',
   // v751（PR #119）：光标不再写 document.body.style.cursor —— cursor 是可继承属性，写 <body> 会让 Blink
   // 失效**整棵文档树**的样式；而它在点击链路上按下/抬手各写一次，紧接着 isWhaleHit() 的
   // getBoundingClientRect() 与泡泡行测量的 getComputedStyle()/scrollWidth 会强制刷新样式+布局，
@@ -20017,7 +20022,7 @@ function sceneOpen(kind, renderFn, ttlMs) {
   //   队列泡泡（normal/random/custom）由 bubbleShowSeqNext() 在调用前按该项的框画好。
   // v851（第 4 条）：系统泡泡现在**各自也能选框**（usageSet.<kind>.frameId）——没选才跟随保底。
   try {
-    if (kind === 'cost' || kind === 'alert' || kind === 'wait' || kind === 'proactive' || kind === 'interactive') {
+    if (kind === 'cost' || kind === 'alert' || kind === 'wait' || kind === 'proactive' || kind === 'interactive' || kind === 'music') {
       var sysFid = sysFrameIdOf(kind)
       if (sysFid && frameById(sysFid)) {
         // 走渲染器同一套：内置框/找不到的 id 会自动回落（resolveFrameForStep 的三级回退）
@@ -21549,7 +21554,7 @@ function showBubble() {
   if (!bubbleOn) return
   if (costBubbleActive) return
   // 主动/互动气泡正在展示时，余额刷新之类的通用泡泡不要抢层；等它自己收掉。
-  if (bubbleScene && (bubbleScene.kind === 'proactive' || bubbleScene.kind === 'interactive')) return
+  if (bubbleScene && (bubbleScene.kind === 'proactive' || bubbleScene.kind === 'interactive' || bubbleScene.kind === 'music')) return
   bubbleRoundOn = true
   bubbleSeqIdx = 0
   bubbleShowSeqNext()
@@ -22072,6 +22077,8 @@ function animateAmount(from, to, currency, duration) {
 function render() {
   // 消耗金额泡泡显示期间，余额渲染不覆盖其内容（金额行/标题行/提示行）
   if (costBubbleActive) return
+  // 音乐伴舞：歌词场景期间不让余额刷新覆盖歌词（停播后 hideBubble → 下一次余额事件自然恢复）
+  if (bubbleScene && bubbleScene.kind === 'music') return
   var amount, hint
   if (state.status === 'error') {
     amount = shown !== null ? fmt(shown, state.currency) : '--'
@@ -25440,7 +25447,236 @@ try {
   document.addEventListener('visibilitychange', function () { sendInteractivePresence() })
 } catch (err) {}
 setInterval(function () { pollLastTurn(); pollWaitState(); pollProactive(); pollInteractiveEvents() }, 1000)
+  try {
+    // 依赖显式传入：initMusicDance 定义在 dshwInit 外面，拿不到它的局部 var
+    // （state / root / express / bubbleOn … 都是 dshwInit 内的作用域）
+    initMusicDance({
+      state: state,
+      root: root,
+      express: express,
+      viewport: viewport,
+      clamp: clamp,
+      rightGap: rightGap,
+      sceneOpen: sceneOpen,
+      renderModules: bubbleRenderModules,
+      hideBubble: hideBubble,
+      refreshFlip: refreshFlip,
+      get bubbleOn() { return bubbleOn },
+      get bubbleScene() { return bubbleScene },
+      get drag() { return drag },
+    })
+  } catch (err) {}
 }
+// ===== 音乐伴舞：宿主 SMTC 探针 → 歌词气泡 + 横向走动 =====
+// 宿主每 ~0.3s 探一次系统媒体会话；这里每 0.3 秒拉一次快照。
+// 设计取舍：
+//   · 播放期间泡泡显示歌词（用户确认可以盖住余额），停播收起，余额照旧；
+//   · 走动是「横穿一段」而不是原地小晃：每段至少 45% 视口宽，到点停 1~3 秒再折返；
+//   · 用户一拖（drag.active）就暂停，松手继续；页面隐藏时不跑 rAF。
+function initMusicDance(deps) {
+  var state = deps.state
+  var root = deps.root
+  var express = deps.express
+  var viewport = deps.viewport
+  var clamp = deps.clamp
+  var rightGap = deps.rightGap
+  var sceneOpen = deps.sceneOpen
+  var bubbleRenderModules = deps.renderModules
+  var hideBubble = deps.hideBubble
+  var refreshFlip = deps.refreshFlip
+  if (window.__dshwMusicDance) return
+  window.__dshwMusicDance = true
+  var enabled = true
+  try { enabled = localStorage.getItem('dshw-music') !== '0' } catch (err) {}
+  if (!enabled) return
+
+  var MUSIC_URL = '/dsh-whale/now-playing.json'
+  var dance = {
+    active: false,
+    playing: false,
+    line: '',
+    title: '',
+    artist: '',
+    key: '',
+  }
+  var walk = { raf: 0, dir: 1, target: null, waitUntil: 0, speed: 110, lastTs: 0 }
+
+  // 分步兜底：任何一步抛错都要在控制台留痕，绝不让后面的步骤被 Promise 的
+  // catch 静默吞掉（之前就是这样：泡泡那步失败 → startWalk 永远不执行）。
+  function safeCall(label, fn) {
+    try { return fn() } catch (err) {
+      try { console.warn('[whale-music] ' + label + ' failed:', err) } catch (e) {}
+      return undefined
+    }
+  }
+
+  function viewportW() { var v = viewport(); return v.w }
+  function widgetW() { return root.offsetWidth || root.getBoundingClientRect().width || 0 }
+  function maxLeft() { return Math.max(0, viewportW() - widgetW() - rightGap()) }
+
+  function lyricText() {
+    if (dance.line) return dance.line
+    if (dance.title) return '♪ ' + dance.title + (dance.artist ? ' · ' + dance.artist : '')
+    return ''
+  }
+
+  function renderLyric() {
+    bubbleRenderModules([{ type: 'text', text: lyricText(), size: 7, bold: true }])
+  }
+
+  function openLyricScene() {
+    if (!deps.bubbleOn) return
+    sceneOpen('music', renderLyric, 0)
+  }
+
+  function updateLyric() {
+    var text = lyricText()
+    if (!text || text === dance.key) return
+    var scene = deps.bubbleScene && deps.bubbleScene.kind
+    // 别抢主动/互动/等待类气泡：那些优先级更高。**先不改 dance.key** ——
+    // 否则这句被吞掉后再也不会补显示（歌一直唱、词永远停在上一句的经典 bug）。
+    if (scene && scene !== 'music') return
+    dance.key = text
+    try { console.log('[whale-music] lyric ->', text) } catch (err) {}
+    if (scene === 'music') {
+      safeCall('renderLyric', renderLyric)
+      return
+    }
+    safeCall('openLyricScene', openLyricScene)
+  }
+
+  function nextTarget() {
+    var max = maxLeft()
+    var dir = walk.dir
+    // 目标 = 该方向上的屏幕边（不是「当前点 ± 一段」——那样会在屏幕中间掉头）
+    var x = dir > 0 ? max : 0
+    // 已经贴在这一边（余量小于 40px）：换向去另一边，避免原地反复
+    if (Math.abs(x - state.left) < 40) {
+      dir = -dir
+      x = dir > 0 ? max : 0
+    }
+    walk.dir = dir
+    walk.target = clamp(x, 0, max)
+    try { console.log('[whale-music] leg dir=' + dir + ' from=' + Math.round(state.left) + ' to=' + Math.round(walk.target)) } catch (err) {}
+  }
+
+  function step(ts) {
+    walk.raf = requestAnimationFrame(step)
+    if (!dance.active) return
+    var dt = walk.lastTs ? Math.min(0.1, (ts - walk.lastTs) / 1000) : 0.016
+    walk.lastTs = ts
+    if (deps.drag && deps.drag.active) return
+    var now = Date.now()
+    if (now < walk.waitUntil) return
+    if (walk.target === null) {
+      nextTarget()
+      safeCall('dance class on', function () { root.classList.add('dshwv-dancing') })
+    }
+    var max = maxLeft()
+    var dx = walk.target - state.left
+    if (Math.abs(dx) < 1.5) {
+      walk.target = null
+      walk.waitUntil = now + 1200 + Math.random() * 1800
+      // 端点停留：先收掉果冻步（站着还一直弹会很怪），朝向转回屏幕内侧
+      safeCall('dance class off', function () { root.classList.remove('dshwv-dancing') })
+      refreshFlip()
+      return
+    }
+    // 朝向跟着行进方向：默认素材朝左，向右走要镜像、向左走不镜像
+    state.flip = walk.dir > 0
+    var move = Math.min(Math.abs(dx), walk.speed * dt)
+    state.left = clamp(state.left + (dx > 0 ? move : -move), 0, max)
+    express()
+  }
+
+  function startWalk() {
+    if (walk.raf) return
+    try { root.style.transition = 'none' } catch (err) {}
+    walk.target = null
+    walk.waitUntil = 0
+    walk.lastTs = 0
+    walk.dir = state.left > maxLeft() / 2 ? -1 : 1
+    safeCall('dance class on', function () { root.classList.add('dshwv-dancing') })
+    walk.raf = requestAnimationFrame(step)
+  }
+
+  function stopWalk() {
+    if (walk.raf) { cancelAnimationFrame(walk.raf); walk.raf = 0 }
+    walk.target = null
+    walk.lastTs = 0
+    safeCall('dance class off', function () { root.classList.remove('dshwv-dancing') })
+    try { root.style.transition = '' } catch (err) {}
+  }
+
+  function startDance() {
+    dance.active = true
+    dance.key = ''
+    safeCall('openLyricScene', openLyricScene)
+    safeCall('updateLyric', updateLyric)
+    safeCall('startWalk', startWalk)
+    try { console.log('[whale-music] dance start:', dance.title) } catch (err) {}
+  }
+
+  function stopDance() {
+    dance.active = false
+    dance.playing = false
+    dance.key = ''
+    stopWalk()
+    // 收工后恢复「面朝屏幕内侧」的静止朝向（与没跳过舞时一致）
+    refreshFlip()
+    if (deps.bubbleScene && deps.bubbleScene.kind === 'music') {
+      try { hideBubble() } catch (err) {}
+    }
+  }
+
+  function poll() {
+    if (document.hidden) return
+    try {
+      fetch(MUSIC_URL, { cache: 'no-store' })
+        .then(function (r) { return r.json() })
+        .then(function (d) {
+          if (!d || !d.ok) return
+          dance.playing = !!d.playing
+          dance.line = d.line || ''
+          dance.title = d.title || ''
+          dance.artist = d.artist || ''
+          if (dance.playing) {
+            if (!dance.active) startDance()
+            updateLyric()
+          } else if (dance.active) {
+            stopDance()
+          }
+        })
+        .catch(function (err) {
+          try { console.warn('[whale-music] poll failed:', err) } catch (e) {}
+        })
+    } catch (err) {}
+  }
+
+  // 诊断口：控制台里可直接看走动状态（只在装了音乐模块的页面存在）
+  try {
+    window.__dshwMusicDebug = {
+      dance: dance,
+      walk: walk,
+      poll: poll,
+      startDance: startDance,
+      startWalk: startWalk,
+      get stateLeft() { return state.left },
+      get flip() { return state.flip },
+      get rootLeft() { try { return root.style.left } catch (err) { return '' } },
+    }
+  } catch (err) {}
+
+  poll()
+  setInterval(poll, 300)
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) poll()
+  })
+}
+
 // 主界面检测通过（或稍后由 MutationObserver 检测到）后执行挂件初始化；非主界面不启动
 try { dshwTryStart(true) } catch (err) {}
 })()
+
+
+

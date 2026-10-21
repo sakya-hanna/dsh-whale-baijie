@@ -15,7 +15,7 @@
   "main": "lib/index.js",
   "icon": "./icon.png",
   "scripts": {
-    "test": "node test/proactive.test.mjs && node test/interactive.test.mjs && node test/conflict.test.mjs && node test/frontend-proactive.test.mjs && node test/proactive-routes.test.mjs && node test/host-integration.test.mjs"
+    "test": "node test/proactive.test.mjs && node test/interactive.test.mjs && node test/conflict.test.mjs && node test/frontend-proactive.test.mjs && node test/proactive-routes.test.mjs && node test/host-integration.test.mjs && node test/music.test.mjs"
   },
   "files": [
     "lib",

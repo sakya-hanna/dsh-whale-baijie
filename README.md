@@ -195,6 +195,42 @@
 - 🎯 **额度**：该模型的「额度」里，已用来源可选 **Codex 本地会话 token**（不重置＝累计−基准、每日＝今日、每月＝本月），复用同一套展示与泡泡模块
 - 🪟 **订阅窗口（5h / 周）**：日志里的 `rate_limits` 带窗口快照，有 ChatGPT 订阅时子菜单自动追加 `5h 已用 x% · 2小时30分后重置 | 周 已用 y% · 3天后重置`（字段名已做容错；API-key 计费或无订阅时该行不显示）
 
+## 音乐伴舞（歌词 + 横穿屏幕）
+
+检测到系统正在播放音乐时，白姐会：
+
+- 在泡泡里滚动**当前歌词**（播放期间盖住余额，停播恢复）；
+- **横向走过整块屏幕**：走到屏幕边停 1~3 秒、转身再走回来，走动时带「果冻步」弹性；
+- 暂停/播完自动停下，恢复播放接着走；用户拖动挂件时暂停走动。
+
+数据链路（`lib/music.mjs` + `assets/music-now-playing.ps1`）：
+
+1. 宿主起一个常驻 **Windows PowerShell 5.1** 探针，每 0.3 秒读一次系统媒体会话（SMTC），
+   用 `LastUpdatedTime` 把采样位置外推到「现在」，写进 `$DSH_HOME/now-playing.json`；
+2. 前端每 0.3 秒拉 `/dsh-whale/now-playing.json`，按 `position` 取当前歌词句；
+3. 歌词源：lrclib → 网易云（`music.163.com` 公开搜索 + 歌词接口），带缓存、滤掉「作词/作曲」名单行。
+
+### 播放器要求（重要）
+
+**必须让播放器把播放信息交给 Windows 的 SMTC**，否则只能退化到「读窗口标题 + 估时」，
+歌词会随暂停/缓冲/拖动进度条而偏——这不是参数能修好的。
+
+| 播放器 | 情况 |
+| --- | --- |
+| QQ 音乐、Spotify、浏览器（Edge/Chrome 里的网页播放） | 原生支持，开箱即用 |
+| **网易云音乐（Win32 桌面版）** | **不注册 SMTC**，必须打补丁（见下） |
+
+网易云桌面版（实测 `3.1.29`，InfLink-rs 支持 `3.1.20`~`3.1.41`）：
+
+1. 安装 [BetterNCM](https://github.com/std-microblock/BetterNCM-Installer)（插件加载器，会往网易云目录写 `msimg32.dll`）；
+2. 把 [InfLink-rs](https://github.com/apoint123/inflink-rs) 的 `.plugin` 放进 `C:\betterncm\plugins\`（或从 BetterNCM 插件商店装）；
+3. 完全退出并重开网易云，**播放后等 10~20 秒**，InfLink 才会把 SMTC 会话注册上。
+
+依据：[dsh-netease-island 的实测记录](https://github.com/yezisorft/dsh-netease-island)（网易云 150 秒采样 75 次 `GetSessions()` 全为 0；接 InfLink-rs 后进度正常）。
+
+> 风险与回退：BetterNCM 是第三方注入，网易云官方不支持；杀软可能误报；客户端大版本升级后可能失效。
+> 回退：卸载 BetterNCM，或删掉 `C:\betterncm` 与网易云目录里的 `msimg32.dll`。
+
 ## 目录结构
 
 ```text
