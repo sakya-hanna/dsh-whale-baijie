@@ -574,6 +574,8 @@ var css = [
   // 代价是 img 的**矩形**（含透明边距）会吞掉点击 → 由 setupHitTest() 用命中图的**凸包**做 clip-path
   // 裁掉透明区（凸包包含全部不透明像素，不会裁到角色本身），"点到透明处穿透到下层"的行为得以保留。
   '.dshwv-img{position:absolute;right:0;bottom:0;width:59.45%;height:59.45%;display:block;pointer-events:auto;-webkit-user-drag:none;user-select:none;object-fit:contain;object-position:right bottom}',
+  // 音乐模式专用形象（3:2，人物在右、音箱在左）：按高度对齐，人物大小不变，音箱占左侧空白
+  '.dshwv-root.dshwv-music-art .dshwv-img{width:auto;max-width:none;height:50%;object-position:right bottom}',
   // 音乐伴舞：走路时的「果冻步」。只作用在角色 img 上——点击 Q 弹用的是 .dshwv-body，
   // 根节点的左右镜像用的是 .dshwv-root 的 scaleX(-1)，三者互不覆盖。
   '@keyframes dshwv-walk-bob{0%{transform:translateY(0) scale(1,1)}18%{transform:translateY(-3%) scale(.96,1.05)}38%{transform:translateY(0) scale(1.04,.95)}58%{transform:translateY(-1.2%) scale(1,1.02)}78%{transform:translateY(0) scale(1,1)}100%{transform:translateY(0) scale(1,1)}}',
@@ -2226,9 +2228,43 @@ roleFileInput.style.display = 'none'
 roleBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleRolePanel() })
 roleImportBtn.addEventListener('click', function (e) { e.stopPropagation(); roleFileInput.click() })
 roleFileInput.addEventListener('change', function () { onRoleFileChosen(roleFileInput) })
+// —— 音乐伴舞开关：只停白姐的歌词/走动，**不影响播放器本身** ——
+var rowMusic = menuRow()
+rowMusic.appendChild(menuLabel('音乐伴舞'))
+var musicStateEl = document.createElement('span')
+musicStateEl.className = 'dshwv-volpct'
+rowMusic.appendChild(musicStateEl)
+var musicToggleBtn = document.createElement('button')
+musicToggleBtn.type = 'button'
+musicToggleBtn.className = 'dshwv-roleimport'
+musicToggleBtn.style.flex = '1'
+musicToggleBtn.title = '只停白姐的音乐伴舞与歌词，不会暂停/关闭你的播放器；再点一次恢复'
+rowMusic.appendChild(musicToggleBtn)
+function renderMusicMenuState() {
+  var on = true
+  try {
+    if (typeof window.__dshwMusicEnabled === 'function') on = !!window.__dshwMusicEnabled()
+    else on = localStorage.getItem('dshw-music') !== '0'
+  } catch (err) {}
+  musicStateEl.textContent = on ? '跟随播放' : '已停止'
+  musicToggleBtn.textContent = on ? '停止伴舞' : '恢复伴舞'
+}
+renderMusicMenuState()
+musicToggleBtn.addEventListener('click', function (e) {
+  e.stopPropagation()
+  try {
+    var on = true
+    if (typeof window.__dshwMusicEnabled === 'function') on = !!window.__dshwMusicEnabled()
+    else on = localStorage.getItem('dshw-music') !== '0'
+    if (typeof window.__dshwMusicSetEnabled === 'function') window.__dshwMusicSetEnabled(!on)
+    else localStorage.setItem('dshw-music', on ? '0' : '1')
+  } catch (err) {}
+  renderMusicMenuState()
+})
 menuBox.appendChild(rowRole)
 menuBox.appendChild(row1)
 menuBox.appendChild(row2)
+menuBox.appendChild(rowMusic)
 menuBox.appendChild(rowProactive)
 menuBox.appendChild(rowHat)
 menuBox.appendChild(rowTalk)
@@ -25461,6 +25497,8 @@ setInterval(function () { pollLastTurn(); pollWaitState(); pollProactive(); poll
       renderModules: bubbleRenderModules,
       hideBubble: hideBubble,
       refreshFlip: refreshFlip,
+      img: img,
+      setupHitTest: setupHitTest,
       get bubbleOn() { return bubbleOn },
       get bubbleScene() { return bubbleScene },
       get drag() { return drag },
@@ -25484,14 +25522,45 @@ function initMusicDance(deps) {
   var bubbleRenderModules = deps.renderModules
   var hideBubble = deps.hideBubble
   var refreshFlip = deps.refreshFlip
+
+  // —— 音乐模式专用形象（透明 PNG，缺图时自动沿用原角色）——
+  var MUSIC_ART_URL = '/dsh-whale/music-art.png'
+  var musicArt = { active: false, prevSrc: '' }
+  function musicArtOn() {
+    if (musicArt.active || !deps.img) return
+    var probe = new Image()
+    probe.onload = function () {
+      if (musicArt.active) return
+      musicArt.prevSrc = deps.img.getAttribute('src') || ''
+      musicArt.active = true
+      deps.img.setAttribute('src', MUSIC_ART_URL)
+      try { deps.root.classList.add('dshwv-music-art') } catch (err) {}
+      // 命中图是按方形图算的；3:2 的图先放开裁剪，避免点击区域错位
+      try { deps.img.style.clipPath = 'none' } catch (err) {}
+    }
+    probe.onerror = function () {} // 没放图/加载失败：保持原角色，不报错
+    probe.src = MUSIC_ART_URL
+  }
+  function musicArtOff() {
+    if (!musicArt.active) return
+    musicArt.active = false
+    try { deps.root.classList.remove('dshwv-music-art') } catch (err) {}
+    try {
+      // 只在仍是音乐形象时换回：期间用户切了角色/换了图就不抢
+      if (deps.img && (deps.img.getAttribute('src') || '') === MUSIC_ART_URL && musicArt.prevSrc) {
+        deps.img.setAttribute('src', musicArt.prevSrc)
+        try { deps.img.style.clipPath = '' } catch (err) {}
+        // 按换回后的图重建命中凸包（异步；期间退回矩形判定）
+        safeCall('hitTest restore', function () { deps.setupHitTest(musicArt.prevSrc) })
+      }
+    } catch (err) {}
+  }
   if (window.__dshwMusicDance) return
   window.__dshwMusicDance = true
-  var enabled = true
-  try { enabled = localStorage.getItem('dshw-music') !== '0' } catch (err) {}
-  if (!enabled) return
 
   var MUSIC_URL = '/dsh-whale/now-playing.json'
   var dance = {
+    enabled: true,
     active: false,
     playing: false,
     line: '',
@@ -25499,6 +25568,7 @@ function initMusicDance(deps) {
     artist: '',
     key: '',
   }
+  try { dance.enabled = localStorage.getItem('dshw-music') !== '0' } catch (err) {}
   var walk = { raf: 0, dir: 1, target: null, waitUntil: 0, speed: 110, lastTs: 0 }
 
   // 分步兜底：任何一步抛错都要在控制台留痕，绝不让后面的步骤被 Promise 的
@@ -25611,6 +25681,7 @@ function initMusicDance(deps) {
   function startDance() {
     dance.active = true
     dance.key = ''
+    safeCall('musicArtOn', musicArtOn)
     safeCall('openLyricScene', openLyricScene)
     safeCall('updateLyric', updateLyric)
     safeCall('startWalk', startWalk)
@@ -25622,6 +25693,7 @@ function initMusicDance(deps) {
     dance.playing = false
     dance.key = ''
     stopWalk()
+    safeCall('musicArtOff', musicArtOff)
     // 收工后恢复「面朝屏幕内侧」的静止朝向（与没跳过舞时一致）
     refreshFlip()
     if (deps.bubbleScene && deps.bubbleScene.kind === 'music') {
@@ -25631,6 +25703,7 @@ function initMusicDance(deps) {
 
   function poll() {
     if (document.hidden) return
+    if (!dance.enabled) return
     try {
       fetch(MUSIC_URL, { cache: 'no-store' })
         .then(function (r) { return r.json() })
@@ -25653,6 +25726,18 @@ function initMusicDance(deps) {
     } catch (err) {}
   }
 
+  // 手动开关（右键菜单「音乐伴舞」）：只停白姐这边，不碰播放器。
+  // 关：立刻收泡泡/停走动，并停止轮询；开：马上拉一次快照，继续跟当前播放。
+  function setEnabled(on) {
+    dance.enabled = !!on
+    try { localStorage.setItem('dshw-music', on ? '1' : '0') } catch (err) {}
+    if (!on) {
+      stopDance()
+    } else {
+      poll()
+    }
+  }
+
   // 诊断口：控制台里可直接看走动状态（只在装了音乐模块的页面存在）
   try {
     window.__dshwMusicDebug = {
@@ -25661,10 +25746,13 @@ function initMusicDance(deps) {
       poll: poll,
       startDance: startDance,
       startWalk: startWalk,
+      setEnabled: setEnabled,
       get stateLeft() { return state.left },
       get flip() { return state.flip },
       get rootLeft() { try { return root.style.left } catch (err) { return '' } },
     }
+    window.__dshwMusicEnabled = function () { return !!dance.enabled }
+    window.__dshwMusicSetEnabled = setEnabled
   } catch (err) {}
 
   poll()
@@ -25677,6 +25765,10 @@ function initMusicDance(deps) {
 // 主界面检测通过（或稍后由 MutationObserver 检测到）后执行挂件初始化；非主界面不启动
 try { dshwTryStart(true) } catch (err) {}
 })()
+
+
+
+
 
 
 
