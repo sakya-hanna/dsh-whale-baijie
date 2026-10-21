@@ -1,6 +1,6 @@
-{
+﻿{
   "name": "dsh-whale-baijie",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "DSH Web 界面右下角的白姐（小伯白）桌宠挂件：在 dsh-whale-widget 基础上加入「每轮对话后按概率主动冒泡，由当前会话模型决定说什么」，保留余额/今日已用/峰谷、自定义泡泡、音效与语音接口",
   "keywords": [
     "dsh",
@@ -41,3 +41,4 @@
   },
   "license": "MIT"
 }
+
